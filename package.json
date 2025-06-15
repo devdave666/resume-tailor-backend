@@ -1,1 +1,27 @@
+{
+  "name": "resume-tailor-backend",
+  "version": "1.0.0",
+  "description": "Secure backend for the Resume Tailor Chrome Extension",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.8",
+    "cors": "^2.8.5",
+    "docx": "^8.5.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^4.38.3",
+    "pdf-lib": "^1.17.1",
+    "stripe": "^15.6.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
  
