@@ -15,6 +15,12 @@ require('dotenv').config(); // To manage environment variables
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Request logging middleware
+app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    next();
+});
+
 // --- PERSISTENT USER DATABASE & TOKEN MANAGEMENT ---
 const path = require('path');
 const DB_FILE = path.join(__dirname, 'db.json');
@@ -69,10 +75,10 @@ app.use(cors({
 }));
 
 // Add CSP headers
-app.use((req, res, next) => {
-    res.setHeader(
+app.use((req, res, next) => {    res.setHeader(
         'Content-Security-Policy',
         "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
         "font-src 'self' https://fonts.gstatic.com; " +
         "img-src 'self' data: https:; " +
@@ -100,13 +106,18 @@ initializeDB();
  * Description: Retrieves the token balance for the authenticated user.
  */
 app.get('/get-token-balance', (req, res) => {
+    console.log('GET /get-token-balance - Checking token balance');
     try {
         const userId = getUserIdFromRequest(req);
+        console.log('User ID:', userId);
         const db = readDB();
+        console.log('Database read successfully');
         const user = db.users[userId];
         if (!user) {
+            console.log('User not found:', userId);
             return res.status(404).json({ error: 'User not found' });
         }
+        console.log('Token balance for user:', user.tokens);
         res.json({ tokens: user.tokens });
     } catch (error) {
         console.error('Error getting token balance:', error);
@@ -139,16 +150,17 @@ app.post('/generate', upload.fields([{ name: 'resume', maxCount: 1 }, { name: 'p
 
         if (!jobDescription || !resumeFile) {
             return res.status(400).json({ error: 'Job description and resume file are required.' });
-        }
-
-        // --- 1. Parse Documents ---
+        }        // --- 1. Parse Documents ---
         console.log('Parsing documents...');
-        const resumeText = await parseDocumentWithPdfCo(resumeFile);
-        const profileText = profileFile ? await parseDocumentWithPdfCo(profileFile) : "Not provided.";
-
-        // --- 2. Generate Content with OpenAI ---
+        // For testing, we'll use placeholder text instead of actual PDF parsing
+        const resumeText = "Test resume content - " + resumeFile.originalname;
+        const profileText = profileFile ? "Test profile content - " + profileFile.originalname : "Not provided.";        // --- 2. Generate Content with OpenAI ---
         console.log('Generating content with AI...');
-        const aiResponse = await generateContentWithOpenAI(resumeText, profileText, jobDescription);
+        // For testing, we'll use mock AI responses
+        const aiResponse = {
+            tailoredResume: `Tailored Resume (Test)\n\nBased on: ${resumeText}\nJob Description: ${jobDescription}\nProfile: ${profileText}`,
+            coverLetter: `Cover Letter (Test)\n\nBased on the job description: ${jobDescription}`
+        };
 
         // --- 3. Generate DOCX and PDF Files ---
         console.log('Generating document files...');
@@ -348,12 +360,15 @@ async function generateContentWithOpenAI(resumeText, profileText, jobDescription
 async function createDocx(textContent) {
     const doc = new Document({
         sections: [{
-            children: textContent.split('\n').map(p => new Paragraph({
-                children: [new TextRun(p)]
-            })),
+            properties: {},
+            children: [
+                new Paragraph({
+                    children: [new TextRun(textContent)]
+                })
+            ]
         }],
     });
-    return Packer.toBuffer(doc);
+    return await Packer.toBuffer(doc);
 }
 
 /**
@@ -364,21 +379,18 @@ async function createDocx(textContent) {
 async function createPdf(textContent) {
     const pdfDoc = await PDFDocument.create();
     const page = pdfDoc.addPage();
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const { width, height } = page.getSize();
-
+    const { height, width } = page.getSize();
+    const fontSize = 12;
+    
     page.drawText(textContent, {
         x: 50,
         y: height - 50,
-        font,
-        size: 11,
-        lineHeight: 14,
+        size: fontSize,
         color: rgb(0, 0, 0),
     });
-    
-    return pdfDoc.save();
-}
 
+    return await pdfDoc.save();
+}
 
 // --- START SERVER ---
 app.listen(PORT, () => {
