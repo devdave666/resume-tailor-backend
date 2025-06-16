@@ -15,11 +15,39 @@ require('dotenv').config(); // To manage environment variables
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- FAKE USER DATABASE & TOKEN MANAGEMENT ---
-// In a real production app, use a proper database like PostgreSQL or MongoDB.
-const fakeUserDB = {
-    'user123': { id: 'user123', email: 'user@example.com', tokens: 5, stripeCustomerId: 'cus_xxxxxxxxxxxxxx' }
-};
+// --- PERSISTENT USER DATABASE & TOKEN MANAGEMENT ---
+const path = require('path');
+const DB_FILE = path.join(__dirname, 'db.json');
+
+// Initialize database file if it doesn't exist
+function initializeDB() {
+    if (!fs.existsSync(DB_FILE)) {
+        const initialData = {
+            users: {
+                'user123': { id: 'user123', email: 'user@example.com', tokens: 5, stripeCustomerId: 'cus_xxxxxxxxxxxxxx' }
+            }
+        };
+        fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2));
+    }
+}
+
+function readDB() {
+    try {
+        const data = fs.readFileSync(DB_FILE, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        console.error('Error reading database:', error);
+        return { users: {} };
+    }
+}
+
+function writeDB(data) {
+    try {
+        fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+    } catch (error) {
+        console.error('Error writing database:', error);
+    }
+}
 
 const getUserIdFromRequest = (req) => {
     // In a real app, you would get the user ID from a decoded JWT in the Authorization header.
@@ -39,6 +67,9 @@ app.use(express.json()); // Parse JSON bodies
 app.use(express.urlencoded({ extended: true }));
 const upload = multer({ storage: multer.memoryStorage() }); // Use memory storage for file uploads
 
+// Initialize database
+initializeDB();
+
 // --- API ENDPOINTS ---
 
 /**
@@ -49,7 +80,8 @@ const upload = multer({ storage: multer.memoryStorage() }); // Use memory storag
 app.get('/get-token-balance', (req, res) => {
     try {
         const userId = getUserIdFromRequest(req);
-        const user = fakeUserDB[userId];
+        const db = readDB();
+        const user = db.users[userId];
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
@@ -71,7 +103,8 @@ app.post('/generate', upload.fields([{ name: 'resume', maxCount: 1 }, { name: 'p
     console.log('Received /generate request');
 
     const userId = getUserIdFromRequest(req);
-    const user = fakeUserDB[userId];
+    const db = readDB();
+    const user = db.users[userId];
 
     if (!user || user.tokens <= 0) {
         return res.status(402).json({ error: 'Insufficient tokens. Please purchase more.' });
@@ -105,6 +138,7 @@ app.post('/generate', upload.fields([{ name: 'resume', maxCount: 1 }, { name: 'p
 
         // --- 4. Deduct Token ---
         user.tokens -= 1;
+        writeDB(db);
         console.log(`Token deducted for user ${userId}. New balance: ${user.tokens}`);
 
         // --- 5. Send Files Back to Client ---
@@ -114,7 +148,7 @@ app.post('/generate', upload.fields([{ name: 'resume', maxCount: 1 }, { name: 'p
             resumePdf: `data:application/pdf;base64,${resumePdfBuffer.toString('base64')}`,
             coverLetterDocx: `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${coverLetterDocxBuffer.toString('base64')}`,
             coverLetterPdf: `data:application/pdf;base64,${coverLetterPdfBuffer.toString('base64')}`,
-            newTokeBalance: user.tokens
+            newTokenBalance: user.tokens
         });
 
     } catch (error) {
@@ -132,7 +166,8 @@ app.post('/generate', upload.fields([{ name: 'resume', maxCount: 1 }, { name: 'p
 app.post('/create-payment-session', async (req, res) => {
     try {
         const userId = getUserIdFromRequest(req);
-        const user = fakeUserDB[userId];
+        const db = readDB();
+        const user = db.users[userId];
 
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
@@ -182,11 +217,13 @@ app.post('/webhook-payment-success', express.raw({type: 'application/json'}), (r
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
         const userId = session.client_reference_id;
-        const user = fakeUserDB[userId];
+        const db = readDB();
+        const user = db.users[userId];
 
         if (user) {
-            // This is where you'd update your database.
+            // Update the database with new token balance
             user.tokens += 5; // Add 5 tokens for this purchase
+            writeDB(db);
             console.log(`Payment successful for user ${userId}. New token balance: ${user.tokens}`);
         } else {
             console.error(`Webhook received for unknown user ID: ${userId}`);
@@ -205,14 +242,32 @@ app.post('/webhook-payment-success', express.raw({type: 'application/json'}), (r
  * @returns {Promise<string>} The extracted text content.
  */
 async function parseDocumentWithPdfCo(file) {
-    const formData = new FormData();
-    formData.append('file', new Blob([file.buffer]), file.originalname);
-
     try {
-        const response = await axios.post('https://api.pdf.co/v1/pdf/convert/to/text', formData, {
-            headers: { 'x-api-key': PDF_CO_API_KEY, ...formData.getHeaders() }
-        });
-        return response.data.body;
+        // For PDF files, use PDF.co text extraction
+        if (file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf')) {
+            const FormData = require('form-data');
+            const formData = new FormData();
+            formData.append('file', file.buffer, {
+                filename: file.originalname,
+                contentType: file.mimetype
+            });
+
+            const response = await axios.post('https://api.pdf.co/v1/pdf/convert/to/text', formData, {
+                headers: {
+                    'x-api-key': PDF_CO_API_KEY,
+                    ...formData.getHeaders()
+                }
+            });
+
+            if (response.data && response.data.body) {
+                return response.data.body;
+            } else {
+                throw new Error('No text content returned from PDF.co API');
+            }
+        } else {
+            // For text files, just convert buffer to string
+            return file.buffer.toString('utf8');
+        }
     } catch (error) {
         console.error('PDF.co API Error:', error.response ? error.response.data : error.message);
         throw new Error('Failed to parse document.');
