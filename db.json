@@ -1,0 +1,10 @@
+{
+  "users": {
+    "user123": {
+      "id": "user123",
+      "email": "user@example.com",
+      "tokens": 5,
+      "stripeCustomerId": "cus_xxxxxxxxxxxxxx"
+    }
+  }
+}

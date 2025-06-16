@@ -62,8 +62,30 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const PDF_CO_API_KEY = process.env.PDF_CO_API_KEY;
 
 // --- MIDDLEWARE ---
-app.use(cors()); // Enable Cross-Origin Resource Sharing
-app.use(express.json()); // Parse JSON bodies
+app.use(cors({
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Add CSP headers
+app.use((req, res, next) => {
+    res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; " +
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+        "font-src 'self' https://fonts.gstatic.com; " +
+        "img-src 'self' data: https:; " +
+        "connect-src 'self' https://api.openai.com https://api.stripe.com;"
+    );
+    next();
+});
+
+// Serve static files
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Parse JSON bodies
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 const upload = multer({ storage: multer.memoryStorage() }); // Use memory storage for file uploads
 
@@ -362,4 +384,4 @@ async function createPdf(textContent) {
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });
- 
+
