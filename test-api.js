@@ -4,7 +4,7 @@ const FormData = require('form-data');
 const fs = require('fs');
 
 async function testAPI() {
-    const baseURL = 'http://localhost:3000';
+    const baseURL = process.env.REPL_SLUG ? `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co` : 'http://0.0.0.0:3000';
     
     console.log('🧪 Testing Resume Tailor API...\n');
     
