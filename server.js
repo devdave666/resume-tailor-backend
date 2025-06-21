@@ -9,6 +9,9 @@ const { OpenAI } = require('openai');
 const { Document, Packer, Paragraph, TextRun } = require('docx');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 const fs = require('fs');
+const { body, validationResult } = require('express-validator');
+const rateLimit = require('express-rate-limit');
+const pdfParse = require('pdf-parse');
 require('dotenv').config(); // To manage environment variables
 
 // --- INITIALIZATION ---
@@ -69,9 +72,13 @@ const PDF_CO_API_KEY = process.env.PDF_CO_API_KEY;
 
 // --- MIDDLEWARE ---
 app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
+    origin: [
+        'chrome-extension://*',
+        ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['*'])
+    ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
 }));
 
 // Add CSP headers
@@ -95,10 +102,81 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 const upload = multer({ storage: multer.memoryStorage() }); // Use memory storage for file uploads
 
+// Rate limiting
+const generateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // limit each IP to 5 requests per windowMs
+    message: { error: 'Too many generation requests, please try again later.' }
+});
+
 // Initialize database
 initializeDB();
 
 // --- API ENDPOINTS ---
+
+/**
+ * Endpoint: /extract-job-posting
+ * Method: POST
+ * Description: Extract job description from webpage HTML for Chrome extension.
+ */
+app.post('/extract-job-posting', async (req, res) => {
+    try {
+        const { url, htmlContent } = req.body;
+        
+        if (!htmlContent) {
+            return res.status(400).json({ error: 'HTML content is required' });
+        }
+        
+        const jobDescription = extractJobFromHTML(htmlContent);
+        res.json({ jobDescription, url });
+    } catch (error) {
+        console.error('Error extracting job posting:', error);
+        res.status(500).json({ error: 'Failed to extract job description' });
+    }
+});
+
+/**
+ * Endpoint: /quick-generate
+ * Method: POST
+ * Description: Simplified generation for extension popup.
+ */
+app.post('/quick-generate', 
+    generateLimiter,
+    upload.single('resume'), 
+    async (req, res) => {
+    try {
+        const userId = getUserIdFromRequest(req);
+        const db = readDB();
+        const user = db.users[userId];
+
+        if (!user || user.tokens <= 0) {
+            return res.status(402).json({ error: 'Insufficient tokens' });
+        }
+
+        const { jobDescription } = req.body;
+        const resumeFile = req.files ? req.files[0] : null;
+
+        if (!jobDescription || !resumeFile) {
+            return res.status(400).json({ error: 'Resume and job description required' });
+        }
+
+        const resumeText = await parseDocumentWithPdfCo(resumeFile);
+        const aiResponse = await generateContentWithOpenAI(resumeText, "Not provided.", jobDescription);
+        
+        // Deduct token
+        user.tokens -= 1;
+        writeDB(db);
+
+        res.json({
+            tailoredResume: aiResponse.tailoredResume,
+            coverLetter: aiResponse.coverLetter,
+            newTokenBalance: user.tokens
+        });
+    } catch (error) {
+        console.error('Error in quick generate:', error);
+        res.status(500).json({ error: 'Generation failed' });
+    }
+});
 
 /**
  * Endpoint: /get-token-balance
@@ -132,8 +210,20 @@ app.get('/get-token-balance', (req, res) => {
  * Description: A single endpoint to handle parsing, AI generation, and file creation.
  * This is more efficient than multiple round-trips from the client.
  */
-app.post('/generate', upload.fields([{ name: 'resume', maxCount: 1 }, { name: 'profile', maxCount: 1 }]), async (req, res) => {
+app.post('/generate', 
+    generateLimiter,
+    upload.fields([{ name: 'resume', maxCount: 1 }, { name: 'profile', maxCount: 1 }]),
+    [
+        body('jobDescription').notEmpty().withMessage('Job description is required')
+    ],
+    async (req, res) => {
     console.log('Received /generate request');
+
+    // Check validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
 
     const userId = getUserIdFromRequest(req);
     const db = readDB();
@@ -152,15 +242,10 @@ app.post('/generate', upload.fields([{ name: 'resume', maxCount: 1 }, { name: 'p
             return res.status(400).json({ error: 'Job description and resume file are required.' });
         }        // --- 1. Parse Documents ---
         console.log('Parsing documents...');
-        // For testing, we'll use placeholder text instead of actual PDF parsing
-        const resumeText = "Test resume content - " + resumeFile.originalname;
-        const profileText = profileFile ? "Test profile content - " + profileFile.originalname : "Not provided.";        // --- 2. Generate Content with OpenAI ---
+        const resumeText = await parseDocumentWithPdfCo(resumeFile);
+        const profileText = profileFile ? await parseDocumentWithPdfCo(profileFile) : "Not provided.";        // --- 2. Generate Content with OpenAI ---
         console.log('Generating content with AI...');
-        // For testing, we'll use mock AI responses
-        const aiResponse = {
-            tailoredResume: `Tailored Resume (Test)\n\nBased on: ${resumeText}\nJob Description: ${jobDescription}\nProfile: ${profileText}`,
-            coverLetter: `Cover Letter (Test)\n\nBased on the job description: ${jobDescription}`
-        };
+        const aiResponse = await generateContentWithOpenAI(resumeText, profileText, jobDescription);
 
         // --- 3. Generate DOCX and PDF Files ---
         console.log('Generating document files...');
@@ -271,7 +356,7 @@ app.post('/webhook-payment-success', express.raw({type: 'application/json'}), (r
 // --- HELPER FUNCTIONS ---
 
 /**
- * Parses a document file buffer using PDF.co API.
+ * Parses a document file buffer using PDF.co API with fallback.
  * @param {File} file - The file object from multer.
  * @returns {Promise<string>} The extracted text content.
  */
@@ -279,32 +364,39 @@ async function parseDocumentWithPdfCo(file) {
     try {
         // For PDF files, use PDF.co text extraction
         if (file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf')) {
-            const FormData = require('form-data');
-            const formData = new FormData();
-            formData.append('file', file.buffer, {
-                filename: file.originalname,
-                contentType: file.mimetype
-            });
+            try {
+                const FormData = require('form-data');
+                const formData = new FormData();
+                formData.append('file', file.buffer, {
+                    filename: file.originalname,
+                    contentType: file.mimetype
+                });
 
-            const response = await axios.post('https://api.pdf.co/v1/pdf/convert/to/text', formData, {
-                headers: {
-                    'x-api-key': PDF_CO_API_KEY,
-                    ...formData.getHeaders()
+                const response = await axios.post('https://api.pdf.co/v1/pdf/convert/to/text', formData, {
+                    headers: {
+                        'x-api-key': PDF_CO_API_KEY,
+                        ...formData.getHeaders()
+                    }
+                });
+
+                if (response.data && response.data.body) {
+                    return response.data.body;
+                } else {
+                    throw new Error('No text content returned from PDF.co API');
                 }
-            });
-
-            if (response.data && response.data.body) {
-                return response.data.body;
-            } else {
-                throw new Error('No text content returned from PDF.co API');
+            } catch (pdfCoError) {
+                console.error('PDF.co failed, trying fallback:', pdfCoError.message);
+                // Fallback to pdf-parse
+                const data = await pdfParse(file.buffer);
+                return data.text;
             }
         } else {
             // For text files, just convert buffer to string
             return file.buffer.toString('utf8');
         }
     } catch (error) {
-        console.error('PDF.co API Error:', error.response ? error.response.data : error.message);
-        throw new Error('Failed to parse document.');
+        console.error('Document parsing error:', error.message);
+        throw new Error('Failed to parse document: ' + error.message);
     }
 }
 
@@ -353,22 +445,55 @@ async function generateContentWithOpenAI(resumeText, profileText, jobDescription
 }
 
 /**
- * Creates a DOCX file buffer from text.
+ * Creates a DOCX file buffer from text with proper formatting.
  * @param {string} textContent - The text to put in the document.
  * @returns {Promise<Buffer>} A buffer of the DOCX file.
  */
 async function createDocx(textContent) {
+    const sections = parseResumeContent(textContent);
+    
     const doc = new Document({
         sections: [{
             properties: {},
-            children: [
+            children: sections.map(section => 
                 new Paragraph({
-                    children: [new TextRun(textContent)]
+                    children: [new TextRun({
+                        text: section.text,
+                        bold: section.isHeader,
+                        size: section.isHeader ? 28 : 24
+                    })]
                 })
-            ]
+            )
         }],
     });
     return await Packer.toBuffer(doc);
+}
+
+/**
+ * Parse resume content into structured sections.
+ * @param {string} textContent - The raw text content.
+ * @returns {Array} Array of formatted sections.
+ */
+function parseResumeContent(textContent) {
+    const lines = textContent.split('\n');
+    const sections = [];
+    
+    lines.forEach(line => {
+        const trimmedLine = line.trim();
+        if (trimmedLine) {
+            // Detect headers (simple heuristic)
+            const isHeader = trimmedLine.length < 50 && 
+                            (trimmedLine.toUpperCase() === trimmedLine || 
+                             trimmedLine.endsWith(':'));
+            
+            sections.push({
+                text: trimmedLine,
+                isHeader: isHeader
+            });
+        }
+    });
+    
+    return sections;
 }
 
 /**
@@ -392,8 +517,65 @@ async function createPdf(textContent) {
     return await pdfDoc.save();
 }
 
+/**
+ * Extract job description from HTML content.
+ * @param {string} htmlContent - The HTML content of the job posting page.
+ * @returns {string} Extracted job description.
+ */
+function extractJobFromHTML(htmlContent) {
+    // Simple text extraction - remove HTML tags and clean up
+    const textContent = htmlContent
+        .replace(/<script[^>]*>.*?<\/script>/gis, '')
+        .replace(/<style[^>]*>.*?<\/style>/gis, '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    
+    // Try to find job-specific sections
+    const jobKeywords = ['responsibilities', 'requirements', 'qualifications', 'skills', 'experience'];
+    const lines = textContent.split('\n');
+    const relevantLines = [];
+    
+    let foundJobSection = false;
+    for (const line of lines) {
+        const lowerLine = line.toLowerCase();
+        if (jobKeywords.some(keyword => lowerLine.includes(keyword))) {
+            foundJobSection = true;
+        }
+        if (foundJobSection && line.trim().length > 20) {
+            relevantLines.push(line.trim());
+        }
+        if (relevantLines.length > 50) break; // Limit length
+    }
+    
+    return relevantLines.length > 0 ? relevantLines.join('\n') : textContent.substring(0, 2000);
+}
+
+// --- DEVELOPMENT TEST ENDPOINTS ---
+if (process.env.NODE_ENV === 'development') {
+    app.get('/test/health', (req, res) => {
+        res.json({ 
+            status: 'OK', 
+            timestamp: new Date().toISOString(),
+            environment: process.env.NODE_ENV || 'development'
+        });
+    });
+    
+    app.post('/test/generate-mock', (req, res) => {
+        res.json({
+            resumeText: 'Mock resume content',
+            aiResponse: {
+                tailoredResume: 'Mock tailored resume',
+                coverLetter: 'Mock cover letter'
+            },
+            message: 'This is a test endpoint with mock data'
+        });
+    });
+}
+
 // --- START SERVER ---
 app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+    console.log(`Server is running on http://0.0.0.0:${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
