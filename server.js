@@ -5,7 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const axios = require('axios');
-const { OpenAI } = require('openai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { Document, Packer, Paragraph, TextRun } = require('docx');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 const fs = require('fs');
@@ -13,6 +13,8 @@ const { body, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const pdfParse = require('pdf-parse');
 require('dotenv').config(); // To manage environment variables
+
+
 
 // --- INITIALIZATION ---
 const app = express();
@@ -66,7 +68,9 @@ const getUserIdFromRequest = (req) => {
 
 // --- API CLIENTS SETUP ---
 // IMPORTANT: API keys are loaded from a .env file for security.
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// --- Google Gemini Client Setup ---
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const PDF_CO_API_KEY = process.env.PDF_CO_API_KEY;
 
@@ -161,7 +165,7 @@ app.post('/quick-generate',
         }
 
         const resumeText = await parseDocumentWithPdfCo(resumeFile);
-        const aiResponse = await generateContentWithOpenAI(resumeText, "Not provided.", jobDescription);
+        const aiResponse = await generateContentWithGemini(resumeText, "Not provided.", jobDescription);
         
         // Deduct token
         user.tokens -= 1;
@@ -245,15 +249,17 @@ app.post('/generate',
         const resumeText = await parseDocumentWithPdfCo(resumeFile);
         const profileText = profileFile ? await parseDocumentWithPdfCo(profileFile) : "Not provided.";        // --- 2. Generate Content with OpenAI ---
         console.log('Generating content with AI...');
-        const aiResponse = await generateContentWithOpenAI(resumeText, profileText, jobDescription);
+        const aiResponse = await generateContentWithGemini(resumeText, profileText, jobDescription);
 
         // --- 3. Generate DOCX and PDF Files ---
         console.log('Generating document files...');
         const { tailoredResume, coverLetter } = aiResponse;
-        const resumeDocxBuffer = await createDocx(tailoredResume);
-        const coverLetterDocxBuffer = await createDocx(coverLetter);
-        const resumePdfBuffer = await createPdf(tailoredResume);
-        const coverLetterPdfBuffer = await createPdf(coverLetter);
+        const resumeSections = parseResumeContent(tailoredResume);
+        const coverLetterSections = parseResumeContent(coverLetter);
+        const resumeDocxBuffer = await createDocx(resumeSections);
+        const coverLetterDocxBuffer = await createDocx(coverLetterSections);
+        const resumePdfBuffer = await createPdf(resumeSections);
+        const coverLetterPdfBuffer = await createPdf(coverLetterSections);
 
         // --- 4. Deduct Token ---
         user.tokens -= 1;
@@ -275,7 +281,6 @@ app.post('/generate',
         res.status(500).json({ error: 'An error occurred during the generation process.' });
     }
 });
-
 
 /**
  * Endpoint: /create-payment-session
@@ -404,44 +409,16 @@ async function parseDocumentWithPdfCo(file) {
  * Generates content using OpenAI GPT-4o.
  * @returns {Promise<object>} An object with `tailoredResume` and `coverLetter`.
  */
-async function generateContentWithOpenAI(resumeText, profileText, jobDescription) {
-    const prompt = `
-        You are an expert career coach and professional resume writer. Your task is to rewrite a user's resume and generate a cover letter to be perfectly tailored for a specific job description.
+async function generateContentWithGemini(resumeText, profileText, jobDescription) {
+    const prompt = `You are an expert resume and cover letter writer. Your task is to tailor the provided resume and generate a cover letter based on the job description. Profile text is optional but can provide more context.\n\nResume Text:\n${resumeText}\n\nProfile Text:\n${profileText}\n\nJob Description:\n${jobDescription}\n\nBased on the above, generate a tailored resume and a cover letter.\n\nRespond with a JSON object containing two keys: 'tailoredResume' and 'coverLetter'. Do not include any other text or formatting in your response.`;
 
-        Follow these instructions carefully:
-        1.  **Analyze the Job Description:** Identify the key skills, qualifications, responsibilities, and keywords.
-        2.  **Tailor the Resume:** Rewrite the user's resume. Do not just copy and paste. Rephrase bullet points and summaries to directly reflect the requirements of the job description. Use strong action verbs. The tone should be highly professional.
-        3.  **Generate the Cover Letter:** Write a concise, compelling, and professional cover letter. It must:
-            - Express clear interest in the specific role and company.
-            - Briefly highlight 2-3 of the most relevant skills or experiences from the tailored resume.
-            - Maintain a professional and enthusiastic tone.
-            - Be addressed to "Dear Hiring Manager," unless a name is available.
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = await response.text();
 
-        **Job Description:**
-        ---
-        ${jobDescription}
-        ---
-
-        **User's Current Resume:**
-        ---
-        ${resumeText}
-        ---
-
-        **User's LinkedIn Profile (for additional context):**
-        ---
-        ${profileText}
-        ---
-
-        Return your response as a single JSON object with two keys: "tailoredResume" and "coverLetter". The value for each key should be a single string containing the full text of the document.
-    `;
-
-    const response = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-    });
-    
-    return JSON.parse(response.choices[0].message.content);
+    // Clean the response to ensure it's valid JSON
+    const cleanedText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    return JSON.parse(cleanedText);
 }
 
 /**
@@ -449,9 +426,7 @@ async function generateContentWithOpenAI(resumeText, profileText, jobDescription
  * @param {string} textContent - The text to put in the document.
  * @returns {Promise<Buffer>} A buffer of the DOCX file.
  */
-async function createDocx(textContent) {
-    const sections = parseResumeContent(textContent);
-    
+async function createDocx(sections) {
     const doc = new Document({
         sections: [{
             properties: {},
@@ -501,17 +476,24 @@ function parseResumeContent(textContent) {
  * @param {string} textContent - The text to put in the document.
  * @returns {Promise<Buffer>} A buffer of the PDF file.
  */
-async function createPdf(textContent) {
+async function createPdf(sections) {
     const pdfDoc = await PDFDocument.create();
     const page = pdfDoc.addPage();
-    const { height, width } = page.getSize();
+    const { height } = page.getSize();
     const fontSize = 12;
-    
-    page.drawText(textContent, {
-        x: 50,
-        y: height - 50,
-        size: fontSize,
-        color: rgb(0, 0, 0),
+    const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const helveticaBold = await pdfDoc.embedFont(StandardFonts.Helvetica-Bold);
+
+    let y = height - 50;
+    sections.forEach(section => {
+        page.drawText(section.text, {
+            x: 50,
+            y: y,
+            size: fontSize,
+            font: section.isHeader ? helveticaBold : helvetica,
+            color: rgb(0, 0, 0),
+        });
+        y -= (fontSize + 6); // Move to the next line
     });
 
     return await pdfDoc.save();
@@ -578,4 +560,3 @@ app.listen(PORT, () => {
     console.log(`Server is running on http://0.0.0.0:${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
-

@@ -4,7 +4,7 @@ const FormData = require('form-data');
 const fs = require('fs');
 
 async function testAPI() {
-    const baseURL = process.env.REPL_SLUG ? `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co` : 'http://0.0.0.0:3000';
+    const baseURL = process.env.REPL_SLUG ? `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co` : 'http://localhost:3000';
     
     console.log('🧪 Testing Resume Tailor API...\n');
     
@@ -14,7 +14,7 @@ async function testAPI() {
         const response = await axios.get(`${baseURL}/get-token-balance`);
         console.log('✅ Token balance:', response.data.tokens);
     } catch (error) {
-        console.error('❌ Token balance failed:', error.response?.data || error.message);
+        console.error('❌ Token balance failed:', error);
         return;
     }
     
@@ -85,7 +85,7 @@ Responsibilities:
         }
         
     } catch (error) {
-        console.error('❌ AI generation failed:', error.response?.data || error.message);
+        console.error('❌ AI generation failed:', error);
         
         if (error.code === 'ECONNABORTED') {
             console.log('💡 This might be due to API timeout. Check your OpenAI API key and rate limits.');
