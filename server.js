@@ -11,7 +11,8 @@ const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 const fs = require('fs');
 const { body, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
-const pdfParse = require('pdf-parse');
+const { PDFExtract } = require('pdf.js-extract');
+const FormData = require('form-data');
 require('dotenv').config(); // To manage environment variables
 
 
@@ -361,48 +362,54 @@ app.post('/webhook-payment-success', express.raw({type: 'application/json'}), (r
 // --- HELPER FUNCTIONS ---
 
 /**
- * Parses a document file buffer using PDF.co API with fallback.
+ * Parses a document file buffer using pdf-lib with fallback to PDF.co API.
  * @param {File} file - The file object from multer.
  * @returns {Promise<string>} The extracted text content.
  */
 async function parseDocumentWithPdfCo(file) {
-    try {
-        // For PDF files, use PDF.co text extraction
-        if (file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf')) {
-            try {
-                const FormData = require('form-data');
-                const formData = new FormData();
-                formData.append('file', file.buffer, {
-                    filename: file.originalname,
-                    contentType: file.mimetype
-                });
+    const fileBuffer = file.buffer;
+    const fileType = file.mimetype;
 
-                const response = await axios.post('https://api.pdf.co/v1/pdf/convert/to/text', formData, {
+    console.log(`Parsing document: ${file.originalname}, type: ${fileType}`);
+
+    if (fileType === 'application/pdf') {
+        try {
+            console.log('Attempting to parse PDF with pdf.js-extract...');
+            const pdfExtract = new PDFExtract();
+            const data = await pdfExtract.extractBuffer(fileBuffer, {});
+            const text = data.pages.map(page => page.content.map(item => item.str).join(' ')).join('\n');
+            console.log('Successfully parsed PDF with pdf.js-extract.');
+            return text;
+        } catch (error) {
+            console.warn('pdf.js-extract failed, falling back to PDF.co API:', error.message);
+            // Fallback to PDF.co API
+            const formData = new FormData();
+            formData.append('file', fileBuffer, file.originalname);
+
+            try {
+                const response = await axios.post('https://api.pdf.co/v1/pdf/convert/to/text-simple', formData, {
                     headers: {
-                        'x-api-key': PDF_CO_API_KEY,
-                        ...formData.getHeaders()
+                        ...formData.getHeaders(),
+                        'x-api-key': PDF_CO_API_KEY
                     }
                 });
-
-                if (response.data && response.data.body) {
-                    return response.data.body;
-                } else {
-                    throw new Error('No text content returned from PDF.co API');
-                }
-            } catch (pdfCoError) {
-                console.error('PDF.co failed, trying fallback:', pdfCoError.message);
-                // Fallback to pdf-parse
-                const data = await pdfParse(file.buffer);
-                return data.text;
+                console.log('Successfully parsed PDF with PDF.co.');
+                return response.data.body;
+            } catch (apiError) {
+                console.error('PDF.co API error:', apiError.response?.data || apiError.message);
+                throw new Error('Failed to parse PDF with both methods.');
             }
-        } else {
-            // For text files, just convert buffer to string
-            return file.buffer.toString('utf8');
         }
-    } catch (error) {
-        console.error('Document parsing error:', error.message);
-        throw new Error('Failed to parse document: ' + error.message);
     }
+
+    // For plain text files
+    if (fileType === 'text/plain') {
+        console.log('Parsing plain text file.');
+        return fileBuffer.toString('utf-8');
+    }
+
+    console.warn(`Unsupported file type: ${fileType}. Returning empty content.`);
+    return ''; // Return empty for unsupported types
 }
 
 /**
