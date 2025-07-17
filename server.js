@@ -5,73 +5,88 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const axios = require('axios');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+
 const { Document, Packer, Paragraph, TextRun } = require('docx');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
-const fs = require('fs');
 const { body, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
-const { PDFExtract } = require('pdf.js-extract');
 const FormData = require('form-data');
+const path = require('path');
 require('dotenv').config(); // To manage environment variables
 
-
+// Import new database and authentication modules
+const { testConnection, validateConfig, logger } = require('./config/database');
+const { authenticateToken, optionalAuth, validateJWTConfig } = require('./middleware/auth');
+const ValidationMiddleware = require('./middleware/validation');
+const ErrorHandler = require('./middleware/errorHandler');
+const AuthService = require('./services/AuthService');
+const DocumentParsingService = require('./services/DocumentParsingService');
+const AIGenerationService = require('./services/AIGenerationService');
+const DocumentGenerationService = require('./services/DocumentGenerationService');
+const PaymentService = require('./services/PaymentService');
+const UserRepository = require('./repositories/UserRepository');
+const GenerationRepository = require('./repositories/GenerationRepository');
 
 // --- INITIALIZATION ---
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Validate configuration on startup
+async function validateStartupConfig() {
+    logger.info('Validating startup configuration...');
+    
+    // Validate environment variables
+    if (!ErrorHandler.validateEnvironment()) {
+        logger.error('Environment validation failed');
+        process.exit(1);
+    }
+    
+    // Validate database configuration
+    if (!validateConfig()) {
+        logger.error('Database configuration validation failed');
+        process.exit(1);
+    }
+    
+    // Validate JWT configuration
+    if (!validateJWTConfig()) {
+        logger.error('JWT configuration validation failed');
+        process.exit(1);
+    }
+    
+    // Test database connection
+    const connected = await testConnection();
+    if (!connected) {
+        logger.error('Database connection failed');
+        process.exit(1);
+    }
+    
+    // Validate AI service configuration
+    if (!AIGenerationService.validateConfiguration()) {
+        logger.error('AI service configuration validation failed');
+        process.exit(1);
+    }
+    
+    // Validate payment service configuration
+    if (!PaymentService.validateConfiguration()) {
+        logger.error('Payment service configuration validation failed');
+        process.exit(1);
+    }
+    
+    logger.info('✓ All configurations validated successfully');
+}
+
 // Request logging middleware
 app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    logger.info(`${req.method} ${req.url}`, { 
+        ip: req.ip, 
+        userAgent: req.get('User-Agent'),
+        timestamp: new Date().toISOString()
+    });
     next();
 });
 
-// --- PERSISTENT USER DATABASE & TOKEN MANAGEMENT ---
-const path = require('path');
-const DB_FILE = path.join(__dirname, 'db.json');
-
-// Initialize database file if it doesn't exist
-function initializeDB() {
-    if (!fs.existsSync(DB_FILE)) {
-        const initialData = {
-            users: {
-                'user123': { id: 'user123', email: 'user@example.com', tokens: 5, stripeCustomerId: 'cus_xxxxxxxxxxxxxx' }
-            }
-        };
-        fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2));
-    }
-}
-
-function readDB() {
-    try {
-        const data = fs.readFileSync(DB_FILE, 'utf8');
-        return JSON.parse(data);
-    } catch (error) {
-        console.error('Error reading database:', error);
-        return { users: {} };
-    }
-}
-
-function writeDB(data) {
-    try {
-        fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-    } catch (error) {
-        console.error('Error writing database:', error);
-    }
-}
-
-const getUserIdFromRequest = (req) => {
-    // In a real app, you would get the user ID from a decoded JWT in the Authorization header.
-    // For this example, we'll use a static user ID.
-    return 'user123';
-};
-
 // --- API CLIENTS SETUP ---
 // IMPORTANT: API keys are loaded from a .env file for security.
-// --- Google Gemini Client Setup ---
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const PDF_CO_API_KEY = process.env.PDF_CO_API_KEY;
 
@@ -87,7 +102,8 @@ app.use(cors({
 }));
 
 // Add CSP headers
-app.use((req, res, next) => {    res.setHeader(
+app.use((req, res, next) => {
+    res.setHeader(
         'Content-Security-Policy',
         "default-src 'self'; " +
         "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
@@ -114,8 +130,49 @@ const generateLimiter = rateLimit({
     message: { error: 'Too many generation requests, please try again later.' }
 });
 
-// Initialize database
-initializeDB();
+// --- AUTHENTICATION ENDPOINTS ---
+
+/**
+ * Endpoint: /auth/register
+ * Method: POST
+ * Description: Register a new user account
+ */
+app.post('/auth/register', 
+    ValidationMiddleware.getRegistrationValidation(),
+    ErrorHandler.asyncHandler(async (req, res) => {
+        await AuthService.register(req, res);
+    })
+);
+
+/**
+ * Endpoint: /auth/login
+ * Method: POST
+ * Description: Login user and return JWT token
+ */
+app.post('/auth/login', 
+    ValidationMiddleware.getLoginValidation(),
+    ErrorHandler.asyncHandler(async (req, res) => {
+        await AuthService.login(req, res);
+    })
+);
+
+/**
+ * Endpoint: /auth/profile
+ * Method: GET
+ * Description: Get current user profile (requires authentication)
+ */
+app.get('/auth/profile', authenticateToken, ErrorHandler.asyncHandler(async (req, res) => {
+    await AuthService.getProfile(req, res);
+}));
+
+/**
+ * Endpoint: /auth/refresh
+ * Method: POST
+ * Description: Refresh JWT token (requires authentication)
+ */
+app.post('/auth/refresh', authenticateToken, ErrorHandler.asyncHandler(async (req, res) => {
+    await AuthService.refreshToken(req, res);
+}));
 
 // --- API ENDPOINTS ---
 
@@ -124,21 +181,19 @@ initializeDB();
  * Method: POST
  * Description: Extract job description from webpage HTML for Chrome extension.
  */
-app.post('/extract-job-posting', async (req, res) => {
-    try {
+app.post('/extract-job-posting', 
+    optionalAuth, 
+    ValidationMiddleware.getJobExtractionValidation(),
+    ErrorHandler.asyncHandler(async (req, res) => {
         const { url, htmlContent } = req.body;
         
-        if (!htmlContent) {
-            return res.status(400).json({ error: 'HTML content is required' });
-        }
+        // Sanitize HTML content
+        const sanitizedHtml = ValidationMiddleware.sanitizeHtml(htmlContent);
+        const jobDescription = extractJobFromHTML(sanitizedHtml);
         
-        const jobDescription = extractJobFromHTML(htmlContent);
         res.json({ jobDescription, url });
-    } catch (error) {
-        console.error('Error extracting job posting:', error);
-        res.status(500).json({ error: 'Failed to extract job description' });
-    }
-});
+    })
+);
 
 /**
  * Endpoint: /quick-generate
@@ -146,68 +201,55 @@ app.post('/extract-job-posting', async (req, res) => {
  * Description: Simplified generation for extension popup.
  */
 app.post('/quick-generate', 
-    generateLimiter,
+    authenticateToken,
+    ValidationMiddleware.createRateLimit({ max: 5, windowMs: 15 * 60 * 1000 }),
+    ValidationMiddleware.validateFileUpload({ required: true, maxSize: 5 * 1024 * 1024 }),
     upload.single('resume'), 
-    async (req, res) => {
-    try {
-        const userId = getUserIdFromRequest(req);
-        const db = readDB();
-        const user = db.users[userId];
+    ValidationMiddleware.getGenerationValidation(),
+    ErrorHandler.asyncHandler(async (req, res) => {
+        const userId = req.user.id;
 
-        if (!user || user.tokens <= 0) {
-            return res.status(402).json({ error: 'Insufficient tokens' });
+        // Check token balance
+        if (req.user.tokens <= 0) {
+            throw ErrorHandler.createError('Insufficient tokens', 402, 'INSUFFICIENT_TOKENS');
         }
 
         const { jobDescription } = req.body;
-        const resumeFile = req.files ? req.files[0] : null;
+        const resumeFile = req.file;
 
-        if (!jobDescription || !resumeFile) {
-            return res.status(400).json({ error: 'Resume and job description required' });
-        }
-
-        const resumeText = await parseDocumentWithPdfCo(resumeFile);
-        const aiResponse = await generateContentWithGemini(resumeText, "Not provided.", jobDescription);
+        // Validate and parse document
+        DocumentParsingService.validateFile(resumeFile);
+        const resumeText = await DocumentParsingService.parseDocument(resumeFile);
+        const aiResponse = await AIGenerationService.generateTailoredContent(resumeText, "Not provided.", jobDescription);
         
-        // Deduct token
-        user.tokens -= 1;
-        writeDB(db);
+        // Deduct token atomically
+        const newBalance = await UserRepository.deductTokens(userId, 1);
+        
+        // Record generation
+        await GenerationRepository.createGeneration(userId, jobDescription, resumeFile.originalname);
+        await GenerationRepository.recordApiUsage(userId, '/quick-generate', 1);
 
         res.json({
             tailoredResume: aiResponse.tailoredResume,
             coverLetter: aiResponse.coverLetter,
-            newTokenBalance: user.tokens
+            newTokenBalance: newBalance
         });
-    } catch (error) {
-        console.error('Error in quick generate:', error);
-        res.status(500).json({ error: 'Generation failed' });
-    }
-});
+    })
+);
 
 /**
  * Endpoint: /get-token-balance
  * Method: GET
  * Description: Retrieves the token balance for the authenticated user.
  */
-app.get('/get-token-balance', (req, res) => {
-    console.log('GET /get-token-balance - Checking token balance');
-    try {
-        const userId = getUserIdFromRequest(req);
-        console.log('User ID:', userId);
-        const db = readDB();
-        console.log('Database read successfully');
-        const user = db.users[userId];
-        if (!user) {
-            console.log('User not found:', userId);
-            return res.status(404).json({ error: 'User not found' });
-        }
-        console.log('Token balance for user:', user.tokens);
-        res.json({ tokens: user.tokens });
-    } catch (error) {
-        console.error('Error getting token balance:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
+app.get('/get-token-balance', authenticateToken, ErrorHandler.asyncHandler(async (req, res) => {
+    const user = await UserRepository.findById(req.user.id);
+    if (!user) {
+        throw ErrorHandler.createError('User not found', 404, 'USER_NOT_FOUND');
     }
-});
-
+    
+    res.json({ tokens: user.tokens });
+}));
 
 /**
  * Endpoint: /generate
@@ -216,295 +258,153 @@ app.get('/get-token-balance', (req, res) => {
  * This is more efficient than multiple round-trips from the client.
  */
 app.post('/generate', 
-    generateLimiter,
+    authenticateToken,
+    ValidationMiddleware.createRateLimit({ max: 5, windowMs: 15 * 60 * 1000 }),
+    ValidationMiddleware.validateFileUpload({ required: true, maxSize: 10 * 1024 * 1024 }),
     upload.fields([{ name: 'resume', maxCount: 1 }, { name: 'profile', maxCount: 1 }]),
-    [
-        body('jobDescription').notEmpty().withMessage('Job description is required')
-    ],
-    async (req, res) => {
-    console.log('Received /generate request');
+    ValidationMiddleware.getGenerationValidation(),
+    ErrorHandler.asyncHandler(async (req, res) => {
+        const userId = req.user.id;
 
-    // Check validation errors
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-    }
-
-    const userId = getUserIdFromRequest(req);
-    const db = readDB();
-    const user = db.users[userId];
-
-    if (!user || user.tokens <= 0) {
-        return res.status(402).json({ error: 'Insufficient tokens. Please purchase more.' });
-    }
-    
-    try {
+        // Check token balance
+        if (req.user.tokens <= 0) {
+            throw ErrorHandler.createError('Insufficient tokens', 402, 'INSUFFICIENT_TOKENS');
+        }
+        
         const { jobDescription } = req.body;
         const resumeFile = req.files['resume'] ? req.files['resume'][0] : null;
         const profileFile = req.files['profile'] ? req.files['profile'][0] : null;
 
-        if (!jobDescription || !resumeFile) {
-            return res.status(400).json({ error: 'Job description and resume file are required.' });
-        }        // --- 1. Parse Documents ---
-        console.log('Parsing documents...');
-        const resumeText = await parseDocumentWithPdfCo(resumeFile);
-        const profileText = profileFile ? await parseDocumentWithPdfCo(profileFile) : "Not provided.";        // --- 2. Generate Content with OpenAI ---
-        console.log('Generating content with AI...');
-        const aiResponse = await generateContentWithGemini(resumeText, profileText, jobDescription);
+        if (!resumeFile) {
+            throw ErrorHandler.createError('Resume file is required', 400, 'MISSING_RESUME_FILE');
+        }
+
+        // --- 1. Parse Documents ---
+        logger.info('Parsing documents', { userId, filename: resumeFile.originalname });
+        const resumeText = await DocumentParsingService.parseDocument(resumeFile);
+        const profileText = profileFile ? await DocumentParsingService.parseDocument(profileFile) : "Not provided.";
+
+        // --- 2. Generate Content with AI ---
+        logger.info('Generating content with AI', { userId });
+        const aiResponse = await AIGenerationService.generateTailoredContent(resumeText, profileText, jobDescription);
 
         // --- 3. Generate DOCX and PDF Files ---
-        console.log('Generating document files...');
+        logger.info('Generating document files', { userId });
         const { tailoredResume, coverLetter } = aiResponse;
-        const resumeSections = parseResumeContent(tailoredResume);
-        const coverLetterSections = parseResumeContent(coverLetter);
-        const resumeDocxBuffer = await createDocx(resumeSections);
-        const coverLetterDocxBuffer = await createDocx(coverLetterSections);
-        const resumePdfBuffer = await createPdf(resumeSections);
-        const coverLetterPdfBuffer = await createPdf(coverLetterSections);
+        
+        // Generate professionally formatted documents
+        const resumeDocuments = await DocumentGenerationService.generateDocuments(tailoredResume, 'resume');
+        const coverLetterDocuments = await DocumentGenerationService.generateDocuments(coverLetter, 'coverLetter');
+        
+        const resumeDocxBuffer = resumeDocuments.docx;
+        const resumePdfBuffer = resumeDocuments.pdf;
+        const coverLetterDocxBuffer = coverLetterDocuments.docx;
+        const coverLetterPdfBuffer = coverLetterDocuments.pdf;
 
         // --- 4. Deduct Token ---
-        user.tokens -= 1;
-        writeDB(db);
-        console.log(`Token deducted for user ${userId}. New balance: ${user.tokens}`);
+        const newBalance = await UserRepository.deductTokens(userId, 1);
+        
+        // --- 5. Record Generation ---
+        await GenerationRepository.createGeneration(userId, jobDescription, resumeFile.originalname);
+        await GenerationRepository.recordApiUsage(userId, '/generate', 1);
 
-        // --- 5. Send Files Back to Client ---
-        console.log('Sending files to client...');
+        // --- 6. Send Files Back to Client ---
+        logger.info('Sending files to client', { userId, newBalance });
         res.status(200).json({
             resumeDocx: `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${resumeDocxBuffer.toString('base64')}`,
             resumePdf: `data:application/pdf;base64,${resumePdfBuffer.toString('base64')}`,
             coverLetterDocx: `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${coverLetterDocxBuffer.toString('base64')}`,
             coverLetterPdf: `data:application/pdf;base64,${coverLetterPdfBuffer.toString('base64')}`,
-            newTokenBalance: user.tokens
+            newTokenBalance: newBalance
         });
-
-    } catch (error) {
-        console.error('Error in /generate endpoint:', error.message);
-        res.status(500).json({ error: 'An error occurred during the generation process.' });
-    }
-});
+    })
+);
 
 /**
  * Endpoint: /create-payment-session
  * Method: POST
  * Description: Creates a Stripe Checkout session for purchasing tokens.
  */
-app.post('/create-payment-session', async (req, res) => {
-    try {
-        const userId = getUserIdFromRequest(req);
-        const db = readDB();
-        const user = db.users[userId];
+app.post('/create-payment-session', 
+    authenticateToken, 
+    [
+        body('packageType')
+            .optional()
+            .isIn(['starter', 'standard', 'premium'])
+            .withMessage('Package type must be starter, standard, or premium'),
+        ValidationMiddleware.handleValidationErrors
+    ],
+    ErrorHandler.asyncHandler(async (req, res) => {
+        const userId = req.user.id;
+        const packageType = req.body.packageType || 'starter';
 
-        const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [
-                {
-                    price_data: {
-                        currency: 'usd',
-                        product_data: {
-                            name: '5 Resume Tokens',
-                            description: 'Tokens for Resume Tailor Extension',
-                        },
-                        unit_amount: 500, // $5.00 in cents
-                    },
-                    quantity: 1,
-                },
-            ],
-            mode: 'payment',
-            success_url: `${process.env.CLIENT_URL}/success.html`, // URL to redirect after successful payment
-            cancel_url: `${process.env.CLIENT_URL}/cancel.html`,   // URL to redirect after canceled payment
-            client_reference_id: userId, // Pass the user ID to the webhook
+        const result = await PaymentService.createCheckoutSession(userId, packageType);
+        
+        res.json({
+            sessionId: result.sessionId,
+            url: result.url,
+            package: result.package
         });
+    })
+);
 
-        res.json({ id: session.id });
-    } catch (error) {
-        console.error('Stripe session error:', error);
-        res.status(500).json({ error: 'Failed to create payment session.' });
-    }
-});
+/**
+ * Endpoint: /payment/packages
+ * Method: GET
+ * Description: Get available token packages
+ */
+app.get('/payment/packages', ErrorHandler.asyncHandler(async (req, res) => {
+    const packages = PaymentService.getTokenPackages();
+    res.json({ packages });
+}));
+
+/**
+ * Endpoint: /payment/history
+ * Method: GET
+ * Description: Get user's payment history
+ */
+app.get('/payment/history', authenticateToken, ErrorHandler.asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const history = await PaymentService.getPaymentHistory(userId);
+    res.json({ history });
+}));
 
 /**
  * Endpoint: /webhook-payment-success
  * Method: POST
  * Description: Stripe webhook to handle successful payment events.
  */
-app.post('/webhook-payment-success', express.raw({type: 'application/json'}), (req, res) => {
+app.post('/webhook-payment-success', express.raw({type: 'application/json'}), async (req, res) => {
     const sig = req.headers['stripe-signature'];
-    let event;
 
     try {
-        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    } catch (err) {
-        console.error(`Webhook Error: ${err.message}`);
-        return res.status(400).send(`Webhook Error: ${err.message}`);
+        const result = await PaymentService.handleWebhook(req.body, sig);
+        
+        logger.info('Webhook processed successfully', { 
+            processed: result.processed,
+            message: result.message,
+            userId: result.userId,
+            tokensAdded: result.tokensAdded
+        });
+        
+        res.json({ received: true, ...result });
+        
+    } catch (error) {
+        logger.error('Webhook processing failed', { error: error.message });
+        res.status(400).json({ 
+            error: error.message,
+            received: false 
+        });
     }
-
-    // Handle the event
-    if (event.type === 'checkout.session.completed') {
-        const session = event.data.object;
-        const userId = session.client_reference_id;
-        const db = readDB();
-        const user = db.users[userId];
-
-        if (user) {
-            // Update the database with new token balance
-            user.tokens += 5; // Add 5 tokens for this purchase
-            writeDB(db);
-            console.log(`Payment successful for user ${userId}. New token balance: ${user.tokens}`);
-        } else {
-            console.error(`Webhook received for unknown user ID: ${userId}`);
-        }
-    }
-
-    res.json({received: true});
 });
-
 
 // --- HELPER FUNCTIONS ---
 
-/**
- * Parses a document file buffer using pdf-lib with fallback to PDF.co API.
- * @param {File} file - The file object from multer.
- * @returns {Promise<string>} The extracted text content.
- */
-async function parseDocumentWithPdfCo(file) {
-    const fileBuffer = file.buffer;
-    const fileType = file.mimetype;
 
-    console.log(`Parsing document: ${file.originalname}, type: ${fileType}`);
 
-    if (fileType === 'application/pdf') {
-        try {
-            console.log('Attempting to parse PDF with pdf.js-extract...');
-            const pdfExtract = new PDFExtract();
-            const data = await pdfExtract.extractBuffer(fileBuffer, {});
-            const text = data.pages.map(page => page.content.map(item => item.str).join(' ')).join('\n');
-            console.log('Successfully parsed PDF with pdf.js-extract.');
-            return text;
-        } catch (error) {
-            console.warn('pdf.js-extract failed, falling back to PDF.co API:', error.message);
-            // Fallback to PDF.co API
-            const formData = new FormData();
-            formData.append('file', fileBuffer, file.originalname);
 
-            try {
-                const response = await axios.post('https://api.pdf.co/v1/pdf/convert/to/text-simple', formData, {
-                    headers: {
-                        ...formData.getHeaders(),
-                        'x-api-key': PDF_CO_API_KEY
-                    }
-                });
-                console.log('Successfully parsed PDF with PDF.co.');
-                return response.data.body;
-            } catch (apiError) {
-                console.error('PDF.co API error:', apiError.response?.data || apiError.message);
-                throw new Error('Failed to parse PDF with both methods.');
-            }
-        }
-    }
 
-    // For plain text files
-    if (fileType === 'text/plain') {
-        console.log('Parsing plain text file.');
-        return fileBuffer.toString('utf-8');
-    }
 
-    console.warn(`Unsupported file type: ${fileType}. Returning empty content.`);
-    return ''; // Return empty for unsupported types
-}
-
-/**
- * Generates content using OpenAI GPT-4o.
- * @returns {Promise<object>} An object with `tailoredResume` and `coverLetter`.
- */
-async function generateContentWithGemini(resumeText, profileText, jobDescription) {
-    const prompt = `You are an expert resume and cover letter writer. Your task is to tailor the provided resume and generate a cover letter based on the job description. Profile text is optional but can provide more context.\n\nResume Text:\n${resumeText}\n\nProfile Text:\n${profileText}\n\nJob Description:\n${jobDescription}\n\nBased on the above, generate a tailored resume and a cover letter.\n\nRespond with a JSON object containing two keys: 'tailoredResume' and 'coverLetter'. Do not include any other text or formatting in your response.`;
-
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = await response.text();
-
-    // Clean the response to ensure it's valid JSON
-    const cleanedText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    return JSON.parse(cleanedText);
-}
-
-/**
- * Creates a DOCX file buffer from text with proper formatting.
- * @param {string} textContent - The text to put in the document.
- * @returns {Promise<Buffer>} A buffer of the DOCX file.
- */
-async function createDocx(sections) {
-    const doc = new Document({
-        sections: [{
-            properties: {},
-            children: sections.map(section => 
-                new Paragraph({
-                    children: [new TextRun({
-                        text: section.text,
-                        bold: section.isHeader,
-                        size: section.isHeader ? 28 : 24
-                    })]
-                })
-            )
-        }],
-    });
-    return await Packer.toBuffer(doc);
-}
-
-/**
- * Parse resume content into structured sections.
- * @param {string} textContent - The raw text content.
- * @returns {Array} Array of formatted sections.
- */
-function parseResumeContent(textContent) {
-    const lines = textContent.split('\n');
-    const sections = [];
-    
-    lines.forEach(line => {
-        const trimmedLine = line.trim();
-        if (trimmedLine) {
-            // Detect headers (simple heuristic)
-            const isHeader = trimmedLine.length < 50 && 
-                            (trimmedLine.toUpperCase() === trimmedLine || 
-                             trimmedLine.endsWith(':'));
-            
-            sections.push({
-                text: trimmedLine,
-                isHeader: isHeader
-            });
-        }
-    });
-    
-    return sections;
-}
-
-/**
- * Creates a PDF file buffer from text.
- * @param {string} textContent - The text to put in the document.
- * @returns {Promise<Buffer>} A buffer of the PDF file.
- */
-async function createPdf(sections) {
-    const pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage();
-    const { height } = page.getSize();
-    const fontSize = 12;
-    const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const helveticaBold = await pdfDoc.embedFont(StandardFonts.Helvetica-Bold);
-
-    let y = height - 50;
-    sections.forEach(section => {
-        page.drawText(section.text, {
-            x: 50,
-            y: y,
-            size: fontSize,
-            font: section.isHeader ? helveticaBold : helvetica,
-            color: rgb(0, 0, 0),
-        });
-        y -= (fontSize + 6); // Move to the next line
-    });
-
-    return await pdfDoc.save();
-}
 
 /**
  * Extract job description from HTML content.
@@ -560,10 +460,145 @@ if (process.env.NODE_ENV === 'development') {
             message: 'This is a test endpoint with mock data'
         });
     });
+    
+    app.post('/test/parse-document', upload.single('document'), async (req, res) => {
+        try {
+            if (!req.file) {
+                return res.status(400).json({ error: 'No file uploaded' });
+            }
+            
+            // Validate file
+            DocumentParsingService.validateFile(req.file);
+            
+            // Get file type info
+            const fileTypeInfo = DocumentParsingService.getFileTypeInfo(req.file.mimetype);
+            
+            // Parse document
+            const extractedText = await DocumentParsingService.parseDocument(req.file);
+            
+            res.json({
+                message: 'Document parsed successfully',
+                fileInfo: {
+                    originalName: req.file.originalname,
+                    mimeType: req.file.mimetype,
+                    size: req.file.size,
+                    type: fileTypeInfo
+                },
+                extractedText: extractedText.substring(0, 1000) + (extractedText.length > 1000 ? '...' : ''),
+                textLength: extractedText.length,
+                timestamp: new Date().toISOString()
+            });
+            
+        } catch (error) {
+            logger.error('Document parsing test failed', { error: error.message });
+            res.status(500).json({ 
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+        }
+    });
+    
+    app.post('/test/ai-generate', async (req, res) => {
+        try {
+            const { resumeText, jobDescription, profileText } = req.body;
+            
+            if (!resumeText || !jobDescription) {
+                return res.status(400).json({ 
+                    error: 'resumeText and jobDescription are required' 
+                });
+            }
+            
+            // Test AI generation
+            const aiResponse = await AIGenerationService.generateTailoredContent(
+                resumeText, 
+                profileText || "Not provided.", 
+                jobDescription
+            );
+            
+            // Get AI service stats
+            const stats = AIGenerationService.getStats();
+            
+            res.json({
+                message: 'AI generation completed successfully',
+                result: {
+                    tailoredResumeLength: aiResponse.tailoredResume.length,
+                    coverLetterLength: aiResponse.coverLetter.length,
+                    tailoredResumePreview: aiResponse.tailoredResume.substring(0, 200) + '...',
+                    coverLetterPreview: aiResponse.coverLetter.substring(0, 200) + '...'
+                },
+                aiStats: stats,
+                timestamp: new Date().toISOString()
+            });
+            
+        } catch (error) {
+            logger.error('AI generation test failed', { error: error.message });
+            res.status(500).json({ 
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+        }
+    });
+    
+    app.post('/test/generate-documents', async (req, res) => {
+        try {
+            const { content, type } = req.body;
+            
+            if (!content) {
+                return res.status(400).json({ 
+                    error: 'content is required' 
+                });
+            }
+            
+            const documentType = type || 'resume';
+            
+            // Test document generation
+            const documents = await DocumentGenerationService.generateDocuments(content, documentType);
+            
+            res.json({
+                message: 'Documents generated successfully',
+                result: {
+                    type: documentType,
+                    sectionsCount: documents.sections,
+                    docxSize: documents.docx.length,
+                    pdfSize: documents.pdf.length,
+                    docxBase64: `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${documents.docx.toString('base64')}`,
+                    pdfBase64: `data:application/pdf;base64,${documents.pdf.toString('base64')}`
+                },
+                timestamp: new Date().toISOString()
+            });
+            
+        } catch (error) {
+            logger.error('Document generation test failed', { error: error.message });
+            res.status(500).json({ 
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+        }
+    });
 }
 
+// --- GLOBAL ERROR HANDLING ---
+
+// 404 handler - must be after all routes
+app.use(ErrorHandler.notFoundHandler);
+
+// Global error handler - must be last middleware
+app.use(ErrorHandler.globalErrorHandler);
+
 // --- START SERVER ---
-app.listen(PORT, () => {
-    console.log(`Server is running on http://0.0.0.0:${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+async function startServer() {
+    try {
+        // Validate configuration before starting
+        await validateStartupConfig();
+        
+        app.listen(PORT, () => {
+            logger.info(`Server is running on http://0.0.0.0:${PORT}`);
+            logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+        });
+    } catch (error) {
+        logger.error('Failed to start server', error);
+        process.exit(1);
+    }
+}
+
+startServer();
