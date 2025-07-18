@@ -65,11 +65,13 @@ CREATE TABLE api_usage (
 ### 1. Authentication System
 
 **JWT Authentication Middleware**
+
 - Validates JWT tokens from Authorization header
 - Extracts user information for request context
 - Handles token expiration and refresh logic
 
 **User Management Service**
+
 - User registration and login endpoints
 - Password hashing using bcrypt
 - JWT token generation and validation
@@ -77,11 +79,13 @@ CREATE TABLE api_usage (
 ### 2. Document Processing Pipeline
 
 **File Upload Handler**
+
 - Multer configuration for memory storage
 - File type validation (PDF, DOCX, TXT)
 - File size limits and security checks
 
 **Document Parser Service**
+
 - Primary: PDF.js-extract for PDF parsing
 - Fallback: PDF.co API for complex PDFs
 - DOCX parsing using docx library
@@ -90,12 +94,14 @@ CREATE TABLE api_usage (
 ### 3. AI Content Generation
 
 **Gemini Integration Service**
+
 - Structured prompts for resume tailoring
 - JSON response parsing and validation
 - Error handling for API failures
 - Rate limiting for API calls
 
 **Content Formatter**
+
 - Resume section identification
 - Professional formatting rules
 - Cover letter template generation
@@ -103,11 +109,13 @@ CREATE TABLE api_usage (
 ### 4. Document Generation
 
 **DOCX Generator**
+
 - Professional resume templates
 - Section-based formatting (headers, bullets, spacing)
 - Cover letter formatting with proper business structure
 
 **PDF Generator**
+
 - Font embedding and styling
 - Multi-page support with proper pagination
 - Professional layout with consistent spacing
@@ -115,6 +123,7 @@ CREATE TABLE api_usage (
 ### 5. Payment Processing
 
 **Stripe Integration**
+
 - Secure checkout session creation
 - Webhook signature verification
 - Atomic token balance updates
@@ -123,11 +132,13 @@ CREATE TABLE api_usage (
 ### 6. Database Layer
 
 **Connection Management**
+
 - PostgreSQL connection pooling
 - Transaction support for atomic operations
 - Connection retry logic and error handling
 
 **Repository Pattern**
+
 - UserRepository for user operations
 - GenerationRepository for tracking
 - Proper SQL injection prevention
@@ -135,6 +146,7 @@ CREATE TABLE api_usage (
 ## Data Models
 
 ### User Model
+
 ```javascript
 {
   id: UUID,
@@ -148,6 +160,7 @@ CREATE TABLE api_usage (
 ```
 
 ### Generation Request Model
+
 ```javascript
 {
   userId: UUID,
@@ -162,6 +175,7 @@ CREATE TABLE api_usage (
 ```
 
 ### AI Response Model
+
 ```javascript
 {
   tailoredResume: string,
@@ -176,6 +190,7 @@ CREATE TABLE api_usage (
 ## Error Handling
 
 ### Error Classification
+
 1. **Validation Errors (400)** - Invalid input parameters
 2. **Authentication Errors (401)** - Invalid or missing tokens
 3. **Authorization Errors (403)** - Insufficient permissions/tokens
@@ -184,6 +199,7 @@ CREATE TABLE api_usage (
 6. **Server Errors (500)** - Internal processing failures
 
 ### Error Response Format
+
 ```javascript
 {
   error: {
@@ -196,6 +212,7 @@ CREATE TABLE api_usage (
 ```
 
 ### Logging Strategy
+
 - Structured logging using Winston
 - Different log levels for different environments
 - Error tracking with stack traces
@@ -204,21 +221,25 @@ CREATE TABLE api_usage (
 ## Testing Strategy
 
 ### Unit Testing
+
 - Service layer testing with mocked dependencies
 - Database repository testing with test database
 - Utility function testing for document processing
 
 ### Integration Testing
+
 - API endpoint testing with supertest
 - Database integration testing
 - External service integration testing with mocks
 
 ### End-to-End Testing
+
 - Complete workflow testing from file upload to document generation
 - Payment processing testing with Stripe test mode
 - Chrome extension compatibility testing
 
 ### Performance Testing
+
 - Load testing for concurrent document generation
 - Memory usage testing for large file processing
 - API response time benchmarking
@@ -226,24 +247,28 @@ CREATE TABLE api_usage (
 ## Security Considerations
 
 ### Input Validation
+
 - File type and size validation
 - SQL injection prevention
 - XSS protection for text content
 - Rate limiting per user and IP
 
 ### Authentication Security
+
 - JWT token expiration and rotation
 - Password strength requirements
 - Secure password hashing with bcrypt
 - Session management
 
 ### API Security
+
 - CORS configuration for Chrome extension
 - API key protection in environment variables
 - Request signing for sensitive operations
 - HTTPS enforcement in production
 
 ### Data Protection
+
 - Database encryption at rest
 - Secure file handling and cleanup
 - PII data handling compliance
@@ -252,17 +277,20 @@ CREATE TABLE api_usage (
 ## Performance Optimizations
 
 ### Caching Strategy
+
 - Redis caching for frequently accessed user data
 - Document template caching
 - API response caching where appropriate
 
 ### Resource Management
+
 - File cleanup after processing
 - Memory management for large documents
 - Connection pooling for database and external APIs
 - Async processing for non-blocking operations
 
 ### Scalability Considerations
+
 - Horizontal scaling support
 - Load balancer compatibility
 - Database read replicas for scaling

@@ -16,6 +16,7 @@ require('dotenv').config(); // To manage environment variables
 
 // Import new database and authentication modules
 const { testConnection, validateConfig, logger } = require('./config/database');
+const ProductionConfig = require('./config/production');
 const { authenticateToken, optionalAuth, validateJWTConfig } = require('./middleware/auth');
 const ValidationMiddleware = require('./middleware/validation');
 const ErrorHandler = require('./middleware/errorHandler');
@@ -24,6 +25,7 @@ const DocumentParsingService = require('./services/DocumentParsingService');
 const AIGenerationService = require('./services/AIGenerationService');
 const DocumentGenerationService = require('./services/DocumentGenerationService');
 const PaymentService = require('./services/PaymentService');
+const MonitoringService = require('./services/MonitoringService');
 const UserRepository = require('./repositories/UserRepository');
 const GenerationRepository = require('./repositories/GenerationRepository');
 
@@ -34,6 +36,16 @@ const PORT = process.env.PORT || 3000;
 // Validate configuration on startup
 async function validateStartupConfig() {
     logger.info('Validating startup configuration...');
+    
+    // Validate production environment
+    const prodValidation = ProductionConfig.validateProductionEnvironment();
+    if (prodValidation.errors.length > 0) {
+        logger.error('Production environment validation failed', { errors: prodValidation.errors });
+        process.exit(1);
+    }
+    if (prodValidation.warnings.length > 0) {
+        logger.warn('Production environment warnings', { warnings: prodValidation.warnings });
+    }
     
     // Validate environment variables
     if (!ErrorHandler.validateEnvironment()) {
@@ -75,13 +87,38 @@ async function validateStartupConfig() {
     logger.info('✓ All configurations validated successfully');
 }
 
-// Request logging middleware
+// Request logging and monitoring middleware
 app.use((req, res, next) => {
+    const startTime = Date.now();
+    
+    // Log request
     logger.info(`${req.method} ${req.url}`, { 
         ip: req.ip, 
         userAgent: req.get('User-Agent'),
         timestamp: new Date().toISOString()
     });
+    
+    // Monitor response
+    res.on('finish', () => {
+        const responseTime = Date.now() - startTime;
+        const success = res.statusCode < 400;
+        
+        // Record metrics
+        MonitoringService.recordRequest(req.path, responseTime, success);
+        
+        // Log response
+        logger.info(`${req.method} ${req.url} - ${res.statusCode}`, {
+            responseTime: `${responseTime}ms`,
+            statusCode: res.statusCode,
+            success
+        });
+    });
+    
+    // Monitor errors
+    res.on('error', (error) => {
+        MonitoringService.recordError(error, req.path);
+    });
+    
     next();
 });
 
@@ -91,44 +128,42 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const PDF_CO_API_KEY = process.env.PDF_CO_API_KEY;
 
 // --- MIDDLEWARE ---
-app.use(cors({
-    origin: [
-        'chrome-extension://*',
-        ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['*'])
-    ],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true
-}));
 
-// Add CSP headers
-app.use((req, res, next) => {
-    res.setHeader(
-        'Content-Security-Policy',
-        "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-        "font-src 'self' https://fonts.gstatic.com; " +
-        "img-src 'self' data: https:; " +
-        "connect-src 'self' https://api.openai.com https://api.stripe.com;"
-    );
-    next();
-});
+// Configure production security middleware
+ProductionConfig.configureSecurityMiddleware(app);
+
+// Configure CORS with production settings
+app.use(cors(ProductionConfig.getCorsConfig()));
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Parse JSON bodies
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-const upload = multer({ storage: multer.memoryStorage() }); // Use memory storage for file uploads
+// Configure server settings
+const serverConfig = ProductionConfig.getServerConfig();
+app.set('trust proxy', serverConfig.trustProxy);
 
-// Rate limiting
-const generateLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // limit each IP to 5 requests per windowMs
-    message: { error: 'Too many generation requests, please try again later.' }
+// Parse JSON bodies with limits
+app.use(express.json({ limit: serverConfig.jsonLimit }));
+app.use(express.urlencoded({ extended: true, limit: serverConfig.urlencodedLimit }));
+
+// Configure multer for file uploads
+const upload = multer({ 
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB
+        files: 5 // Maximum 5 files
+    }
 });
+
+// Configure rate limiting with production settings
+const rateLimitConfig = ProductionConfig.getRateLimitConfig();
+const globalRateLimit = rateLimit(rateLimitConfig.global);
+const authRateLimit = rateLimit(rateLimitConfig.auth);
+const generationRateLimit = rateLimit(rateLimitConfig.generation);
+const paymentRateLimit = rateLimit(rateLimitConfig.payment);
+
+// Apply global rate limiting
+app.use(globalRateLimit);
 
 // --- AUTHENTICATION ENDPOINTS ---
 
@@ -138,6 +173,7 @@ const generateLimiter = rateLimit({
  * Description: Register a new user account
  */
 app.post('/auth/register', 
+    authRateLimit,
     ValidationMiddleware.getRegistrationValidation(),
     ErrorHandler.asyncHandler(async (req, res) => {
         await AuthService.register(req, res);
@@ -150,6 +186,7 @@ app.post('/auth/register',
  * Description: Login user and return JWT token
  */
 app.post('/auth/login', 
+    authRateLimit,
     ValidationMiddleware.getLoginValidation(),
     ErrorHandler.asyncHandler(async (req, res) => {
         await AuthService.login(req, res);
@@ -327,6 +364,7 @@ app.post('/generate',
  */
 app.post('/create-payment-session', 
     authenticateToken, 
+    paymentRateLimit,
     [
         body('packageType')
             .optional()
@@ -576,6 +614,81 @@ if (process.env.NODE_ENV === 'development') {
         }
     });
 }
+
+// --- MONITORING AND HEALTH CHECK ENDPOINTS ---
+
+/**
+ * Endpoint: /health
+ * Method: GET
+ * Description: Comprehensive health check endpoint
+ */
+app.get('/health', ErrorHandler.asyncHandler(async (req, res) => {
+    const healthReport = await MonitoringService.performHealthCheck();
+    
+    // Set appropriate HTTP status based on health
+    const statusCode = healthReport.status === 'healthy' ? 200 : 
+                      healthReport.status === 'degraded' ? 200 : 503;
+    
+    res.status(statusCode).json(healthReport);
+}));
+
+/**
+ * Endpoint: /health/quick
+ * Method: GET
+ * Description: Quick health check for load balancers
+ */
+app.get('/health/quick', (req, res) => {
+    res.status(200).json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: MonitoringService.getUptime().formatted
+    });
+});
+
+/**
+ * Endpoint: /metrics
+ * Method: GET
+ * Description: Application metrics and statistics
+ */
+app.get('/metrics', ErrorHandler.asyncHandler(async (req, res) => {
+    const metrics = MonitoringService.getMetrics();
+    res.json(metrics);
+}));
+
+/**
+ * Endpoint: /status
+ * Method: GET
+ * Description: System status and information
+ */
+app.get('/status', ErrorHandler.asyncHandler(async (req, res) => {
+    const memoryUsage = process.memoryUsage();
+    const cpuUsage = process.cpuUsage();
+    
+    res.json({
+        status: 'running',
+        timestamp: new Date().toISOString(),
+        uptime: MonitoringService.getUptime(),
+        version: process.env.npm_package_version || '1.0.0',
+        environment: process.env.NODE_ENV || 'development',
+        node: {
+            version: process.version,
+            platform: process.platform,
+            architecture: process.arch,
+            pid: process.pid
+        },
+        memory: {
+            heap: {
+                used: MonitoringService.formatBytes(memoryUsage.heapUsed),
+                total: MonitoringService.formatBytes(memoryUsage.heapTotal),
+                percent: Math.round((memoryUsage.heapUsed / memoryUsage.heapTotal) * 100)
+            },
+            rss: MonitoringService.formatBytes(memoryUsage.rss),
+            external: MonitoringService.formatBytes(memoryUsage.external)
+        },
+        cpu: cpuUsage,
+        loadAverage: require('os').loadavg()
+    });
+}));
 
 // --- GLOBAL ERROR HANDLING ---
 
