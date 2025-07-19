@@ -1,15 +1,62 @@
-// config/production.js
-// Production environment configuration and security settings
+// Production Configuration Module
+// Handles production-specific settings, security, and optimizations
 
 const helmet = require('helmet');
 const compression = require('compression');
-const { logger } = require('./database');
+const rateLimit = require('express-rate-limit');
 
 class ProductionConfig {
-    
+    /**
+     * Validate production environment variables
+     */
+    static validateProductionEnvironment() {
+        const errors = [];
+        const warnings = [];
+
+        // Required environment variables
+        const required = [
+            'DB_HOST',
+            'DB_PASSWORD',
+            'JWT_SECRET',
+            'GEMINI_API_KEY',
+            'STRIPE_SECRET_KEY',
+            'STRIPE_WEBHOOK_SECRET'
+        ];
+
+        // Check required variables
+        for (const variable of required) {
+            if (!process.env[variable]) {
+                errors.push(`Missing required environment variable: ${variable}`);
+            }
+        }
+
+        // Check JWT secret strength
+        if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
+            warnings.push('JWT_SECRET should be at least 32 characters long');
+        }
+
+        // Check database SSL in production
+        if (process.env.NODE_ENV === 'production' && !process.env.DB_SSL) {
+            warnings.push('Consider enabling DB_SSL for production database connections');
+        }
+
+        // Check if using default values
+        const defaultValues = {
+            'JWT_SECRET': ['your-jwt-secret-key-here', 'change-me'],
+            'DB_PASSWORD': ['your_password_here', 'password', '123456']
+        };
+
+        for (const [key, defaults] of Object.entries(defaultValues)) {
+            if (process.env[key] && defaults.includes(process.env[key])) {
+                errors.push(`${key} is using a default/weak value. Please change it.`);
+            }
+        }
+
+        return { errors, warnings };
+    }
+
     /**
      * Configure security middleware for production
-     * @param {Object} app - Express app instance
      */
     static configureSecurityMiddleware(app) {
         // Helmet for security headers
@@ -17,376 +64,258 @@ class ProductionConfig {
             contentSecurityPolicy: {
                 directives: {
                     defaultSrc: ["'self'"],
-                    styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-                    fontSrc: ["'self'", "https://fonts.gstatic.com"],
-                    imgSrc: ["'self'", "data:", "https:"],
+                    styleSrc: ["'self'", "'unsafe-inline'"],
                     scriptSrc: ["'self'"],
-                    connectSrc: [
-                        "'self'", 
-                        "https://api.stripe.com",
-                        "https://generativelanguage.googleapis.com",
-                        "https://api.pdf.co"
-                    ],
-                    frameSrc: ["https://js.stripe.com"],
-                    frameAncestors: ["'none'"],
+                    imgSrc: ["'self'", "data:", "https:"],
+                    connectSrc: ["'self'"],
+                    fontSrc: ["'self'"],
                     objectSrc: ["'none'"],
-                    baseUri: ["'self'"],
-                    formAction: ["'self'"]
+                    mediaSrc: ["'self'"],
+                    frameSrc: ["'none'"],
+                    upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null
                 }
             },
-            crossOriginEmbedderPolicy: false, // Allow file downloads
+            crossOriginEmbedderPolicy: false, // Allow Chrome extension integration
             hsts: {
-                maxAge: 31536000, // 1 year
+                maxAge: 31536000,
                 includeSubDomains: true,
                 preload: true
-            },
-            noSniff: true,
-            frameguard: { action: 'deny' },
-            xssFilter: true,
-            referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
+            }
         }));
 
-        // Compression for better performance
+        // Compression middleware
         app.use(compression({
+            level: 6,
+            threshold: 1024,
             filter: (req, res) => {
                 if (req.headers['x-no-compression']) {
                     return false;
                 }
                 return compression.filter(req, res);
-            },
-            level: 6,
-            threshold: 1024
+            }
         }));
 
-        logger.info('Production security middleware configured');
+        // Trust proxy for load balancer
+        app.set('trust proxy', 1);
     }
 
     /**
-     * Configure CORS for production
-     * @returns {Object} CORS configuration
+     * Get CORS configuration for production
      */
     static getCorsConfig() {
-        const allowedOrigins = [
-            'chrome-extension://*',
-            ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [])
-        ];
+        const allowedOrigins = process.env.ALLOWED_ORIGINS 
+            ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+            : ['http://localhost:3000'];
 
-        // In production, be more restrictive
-        if (process.env.NODE_ENV === 'production') {
-            // Remove wildcard and use specific origins
-            const productionOrigins = process.env.ALLOWED_ORIGINS 
-                ? process.env.ALLOWED_ORIGINS.split(',').filter(origin => origin !== '*')
-                : [];
-            
-            return {
-                origin: (origin, callback) => {
-                    // Allow Chrome extensions
-                    if (!origin || origin.startsWith('chrome-extension://')) {
-                        return callback(null, true);
-                    }
-                    
-                    // Check against allowed origins
-                    if (productionOrigins.includes(origin)) {
-                        return callback(null, true);
-                    }
-                    
-                    logger.warn('CORS blocked origin', { origin, allowedOrigins: productionOrigins });
-                    callback(new Error('Not allowed by CORS'));
-                },
-                methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-                allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-                credentials: true,
-                maxAge: 86400 // 24 hours
-            };
-        }
-
-        // Development CORS (more permissive)
         return {
-            origin: allowedOrigins,
+            origin: (origin, callback) => {
+                // Allow requests with no origin (mobile apps, Postman, etc.)
+                if (!origin) return callback(null, true);
+
+                // Check if origin is allowed
+                if (allowedOrigins.includes(origin) || 
+                    origin.startsWith('chrome-extension://') ||
+                    origin.startsWith('moz-extension://')) {
+                    return callback(null, true);
+                }
+
+                // In development, allow localhost
+                if (process.env.NODE_ENV !== 'production' && 
+                    (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+                    return callback(null, true);
+                }
+
+                callback(new Error('Not allowed by CORS'));
+            },
+            credentials: true,
             methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
             allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-            credentials: true
+            exposedHeaders: ['X-Total-Count', 'X-Rate-Limit-Remaining'],
+            maxAge: 86400 // 24 hours
         };
     }
 
     /**
-     * Configure rate limiting for production
-     * @returns {Object} Rate limiting configurations
+     * Get rate limiting configuration
      */
     static getRateLimitConfig() {
         const isProduction = process.env.NODE_ENV === 'production';
         
         return {
-            // Global rate limit
             global: {
                 windowMs: 15 * 60 * 1000, // 15 minutes
-                max: isProduction ? 1000 : 10000, // More restrictive in production
+                max: isProduction ? 1000 : 10000, // requests per window
                 message: {
-                    error: {
-                        code: 'RATE_LIMIT_EXCEEDED',
-                        message: 'Too many requests from this IP, please try again later.',
-                        timestamp: new Date().toISOString()
-                    }
+                    error: 'Too many requests from this IP, please try again later.',
+                    retryAfter: '15 minutes'
                 },
                 standardHeaders: true,
                 legacyHeaders: false,
-                skip: (req) => {
-                    // Skip rate limiting for health checks
-                    return req.path === '/health' || req.path === '/test/health';
+                handler: (req, res) => {
+                    res.status(429).json({
+                        error: 'Rate limit exceeded',
+                        message: 'Too many requests from this IP, please try again later.',
+                        retryAfter: Math.ceil(req.rateLimit.resetTime / 1000)
+                    });
                 }
             },
-            
-            // Authentication endpoints
             auth: {
                 windowMs: 15 * 60 * 1000, // 15 minutes
-                max: isProduction ? 10 : 100, // Very restrictive for auth
+                max: isProduction ? 10 : 100, // login attempts per window
                 message: {
-                    error: {
-                        code: 'AUTH_RATE_LIMIT_EXCEEDED',
-                        message: 'Too many authentication attempts, please try again later.',
-                        timestamp: new Date().toISOString()
-                    }
-                }
+                    error: 'Too many authentication attempts, please try again later.',
+                    retryAfter: '15 minutes'
+                },
+                skipSuccessfulRequests: true,
+                standardHeaders: true,
+                legacyHeaders: false
             },
-            
-            // Generation endpoints
             generation: {
-                windowMs: 15 * 60 * 1000, // 15 minutes
-                max: isProduction ? 5 : 50, // Very restrictive for expensive operations
+                windowMs: 60 * 1000, // 1 minute
+                max: isProduction ? 5 : 50, // generations per minute
                 message: {
-                    error: {
-                        code: 'GENERATION_RATE_LIMIT_EXCEEDED',
-                        message: 'Too many generation requests, please try again later.',
-                        timestamp: new Date().toISOString()
-                    }
-                }
+                    error: 'Generation rate limit exceeded. Please wait before making another request.',
+                    retryAfter: '1 minute'
+                },
+                standardHeaders: true,
+                legacyHeaders: false
             },
-            
-            // Payment endpoints
             payment: {
                 windowMs: 60 * 60 * 1000, // 1 hour
-                max: isProduction ? 10 : 100, // Restrictive for payments
+                max: isProduction ? 10 : 100, // payment attempts per hour
                 message: {
-                    error: {
-                        code: 'PAYMENT_RATE_LIMIT_EXCEEDED',
-                        message: 'Too many payment requests, please try again later.',
-                        timestamp: new Date().toISOString()
-                    }
-                }
+                    error: 'Payment rate limit exceeded. Please contact support if you need assistance.',
+                    retryAfter: '1 hour'
+                },
+                standardHeaders: true,
+                legacyHeaders: false
             }
-        };
-    }
-
-    /**
-     * Validate production environment variables
-     * @returns {Object} Validation result
-     */
-    static validateProductionEnvironment() {
-        const errors = [];
-        const warnings = [];
-        
-        // Required for production
-        const requiredVars = [
-            'NODE_ENV',
-            'PORT',
-            'DB_HOST',
-            'DB_NAME',
-            'DB_USER',
-            'DB_PASSWORD',
-            'JWT_SECRET',
-            'GEMINI_API_KEY',
-            'STRIPE_SECRET_KEY',
-            'STRIPE_WEBHOOK_SECRET'
-        ];
-        
-        // Check required variables
-        requiredVars.forEach(varName => {
-            if (!process.env[varName]) {
-                errors.push(`Missing required environment variable: ${varName}`);
-            }
-        });
-        
-        // Production-specific validations
-        if (process.env.NODE_ENV === 'production') {
-            // JWT Secret strength
-            if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
-                errors.push('JWT_SECRET must be at least 32 characters in production');
-            }
-            
-            // Database security
-            if (process.env.DB_PASSWORD && process.env.DB_PASSWORD.length < 12) {
-                warnings.push('DB_PASSWORD should be at least 12 characters for production');
-            }
-            
-            // API Keys validation
-            if (process.env.STRIPE_SECRET_KEY && process.env.STRIPE_SECRET_KEY.startsWith('sk_test_')) {
-                warnings.push('Using test Stripe key in production environment');
-            }
-            
-            if (process.env.GEMINI_API_KEY === 'your-gemini-api-key-here') {
-                errors.push('GEMINI_API_KEY is set to placeholder value');
-            }
-            
-            // CORS origins
-            if (!process.env.ALLOWED_ORIGINS) {
-                warnings.push('ALLOWED_ORIGINS not set - CORS will be very restrictive');
-            }
-            
-            // SSL/TLS
-            if (!process.env.FORCE_HTTPS && process.env.NODE_ENV === 'production') {
-                warnings.push('FORCE_HTTPS not enabled - consider enabling for production');
-            }
-        }
-        
-        return { errors, warnings };
-    }
-
-    /**
-     * Configure logging for production
-     * @returns {Object} Winston logger configuration
-     */
-    static getLoggingConfig() {
-        const winston = require('winston');
-        const isProduction = process.env.NODE_ENV === 'production';
-        
-        const transports = [];
-        
-        // Console transport
-        transports.push(new winston.transports.Console({
-            format: winston.format.combine(
-                winston.format.timestamp(),
-                winston.format.errors({ stack: true }),
-                isProduction 
-                    ? winston.format.json() 
-                    : winston.format.combine(
-                        winston.format.colorize(),
-                        winston.format.simple()
-                    )
-            )
-        }));
-        
-        // File transport for production
-        if (isProduction) {
-            transports.push(new winston.transports.File({
-                filename: 'logs/error.log',
-                level: 'error',
-                format: winston.format.combine(
-                    winston.format.timestamp(),
-                    winston.format.errors({ stack: true }),
-                    winston.format.json()
-                ),
-                maxsize: 5242880, // 5MB
-                maxFiles: 5
-            }));
-            
-            transports.push(new winston.transports.File({
-                filename: 'logs/combined.log',
-                format: winston.format.combine(
-                    winston.format.timestamp(),
-                    winston.format.errors({ stack: true }),
-                    winston.format.json()
-                ),
-                maxsize: 5242880, // 5MB
-                maxFiles: 5
-            }));
-        }
-        
-        return {
-            level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
-            format: winston.format.combine(
-                winston.format.timestamp(),
-                winston.format.errors({ stack: true }),
-                winston.format.json()
-            ),
-            transports,
-            exitOnError: false
-        };
-    }
-
-    /**
-     * Configure database for production
-     * @returns {Object} Database configuration
-     */
-    static getDatabaseConfig() {
-        const isProduction = process.env.NODE_ENV === 'production';
-        
-        return {
-            host: process.env.DB_HOST,
-            port: process.env.DB_PORT || 5432,
-            database: process.env.DB_NAME,
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            
-            // Connection pool settings
-            max: isProduction ? 20 : 10, // Maximum connections
-            min: isProduction ? 5 : 2,   // Minimum connections
-            idleTimeoutMillis: 30000,
-            connectionTimeoutMillis: 5000,
-            maxUses: 7500,
-            
-            // SSL configuration for production
-            ssl: isProduction ? {
-                rejectUnauthorized: false, // Set to true with proper certificates
-                ca: process.env.DB_SSL_CA,
-                key: process.env.DB_SSL_KEY,
-                cert: process.env.DB_SSL_CERT
-            } : false,
-            
-            // Query timeout
-            query_timeout: 30000,
-            statement_timeout: 30000
-        };
-    }
-
-    /**
-     * Configure session settings for production
-     * @returns {Object} Session configuration
-     */
-    static getSessionConfig() {
-        const isProduction = process.env.NODE_ENV === 'production';
-        
-        return {
-            secret: process.env.SESSION_SECRET || process.env.JWT_SECRET,
-            resave: false,
-            saveUninitialized: false,
-            cookie: {
-                secure: isProduction, // HTTPS only in production
-                httpOnly: true,
-                maxAge: 24 * 60 * 60 * 1000, // 24 hours
-                sameSite: isProduction ? 'strict' : 'lax'
-            },
-            name: 'resume-tailor-session'
         };
     }
 
     /**
      * Get server configuration
-     * @returns {Object} Server configuration
      */
     static getServerConfig() {
-        const isProduction = process.env.NODE_ENV === 'production';
-        
         return {
-            port: process.env.PORT || 3000,
-            host: process.env.HOST || '0.0.0.0',
-            
-            // Trust proxy in production (for load balancers)
-            trustProxy: isProduction,
-            
-            // Request limits
+            trustProxy: process.env.NODE_ENV === 'production' ? 1 : false,
             jsonLimit: '10mb',
             urlencodedLimit: '10mb',
-            
-            // Timeout settings
             timeout: 30000, // 30 seconds
-            keepAliveTimeout: 5000,
-            headersTimeout: 60000
+            keepAliveTimeout: 65000, // 65 seconds (higher than load balancer)
+            headersTimeout: 66000 // 66 seconds
         };
     }
 
     /**
-     * Configure monitoring and health checks
-     * @returns {Object} Monitoring configuration
+     * Get database configuration for production
+     */
+    static getDatabaseConfig() {
+        const isProduction = process.env.NODE_ENV === 'production';
+        
+        return {
+            host: process.env.DB_HOST || 'localhost',
+            port: parseInt(process.env.DB_PORT) || 5432,
+            database: process.env.DB_NAME || 'resume_tailor',
+            user: process.env.DB_USER || 'postgres',
+            password: process.env.DB_PASSWORD,
+            ssl: isProduction ? { rejectUnauthorized: false } : false,
+            
+            // Connection pool settings
+            max: parseInt(process.env.DB_POOL_MAX) || 20,
+            min: parseInt(process.env.DB_POOL_MIN) || 2,
+            idle: parseInt(process.env.DB_POOL_IDLE) || 10000,
+            acquire: parseInt(process.env.DB_POOL_ACQUIRE) || 30000,
+            evict: parseInt(process.env.DB_POOL_EVICT) || 1000,
+            
+            // Connection timeouts
+            connectionTimeoutMillis: 30000,
+            idleTimeoutMillis: 30000,
+            query_timeout: 60000,
+            
+            // Logging
+            logging: isProduction ? false : console.log,
+            
+            // Performance settings
+            statement_timeout: 60000,
+            lock_timeout: 30000,
+            idle_in_transaction_session_timeout: 60000
+        };
+    }
+
+    /**
+     * Get Redis configuration for production
+     */
+    static getRedisConfig() {
+        const isProduction = process.env.NODE_ENV === 'production';
+        
+        return {
+            host: process.env.REDIS_HOST || 'localhost',
+            port: parseInt(process.env.REDIS_PORT) || 6379,
+            password: process.env.REDIS_PASSWORD || undefined,
+            db: parseInt(process.env.REDIS_DB) || 0,
+            
+            // Connection settings
+            connectTimeout: 10000,
+            commandTimeout: 5000,
+            retryDelayOnFailover: 100,
+            maxRetriesPerRequest: 3,
+            
+            // Connection pool
+            lazyConnect: true,
+            keepAlive: 30000,
+            
+            // Cluster settings (if using Redis Cluster)
+            enableReadyCheck: true,
+            maxRetriesPerRequest: null,
+            retryDelayOnFailover: 100,
+            
+            // Performance settings
+            keyPrefix: `resume-tailor:${process.env.NODE_ENV || 'development'}:`,
+            
+            // Error handling
+            retryStrategy: (times) => {
+                const delay = Math.min(times * 50, 2000);
+                return delay;
+            }
+        };
+    }
+
+    /**
+     * Get logging configuration
+     */
+    static getLoggingConfig() {
+        const isProduction = process.env.NODE_ENV === 'production';
+        
+        return {
+            level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
+            format: isProduction ? 'json' : 'simple',
+            
+            // File logging for production
+            files: isProduction ? {
+                error: 'logs/error.log',
+                combined: 'logs/combined.log',
+                access: 'logs/access.log'
+            } : null,
+            
+            // Console logging
+            console: !isProduction,
+            
+            // Log rotation
+            maxsize: 10 * 1024 * 1024, // 10MB
+            maxFiles: 5,
+            
+            // Structured logging fields
+            defaultMeta: {
+                service: 'resume-tailor-backend',
+                environment: process.env.NODE_ENV || 'development',
+                version: process.env.npm_package_version || '1.0.0'
+            }
+        };
+    }
+
+    /**
+     * Get monitoring configuration
      */
     static getMonitoringConfig() {
         return {
@@ -394,27 +323,68 @@ class ProductionConfig {
                 path: '/health',
                 interval: 30000, // 30 seconds
                 timeout: 5000,   // 5 seconds
-                checks: [
-                    'database',
-                    'redis', // if using Redis
-                    'external_apis'
-                ]
+                retries: 3
             },
             
             metrics: {
-                enabled: process.env.ENABLE_METRICS === 'true',
-                path: '/metrics',
-                collectDefaultMetrics: true,
-                requestDuration: true,
-                requestCount: true
+                enabled: true,
+                interval: 60000, // 1 minute
+                retention: 24 * 60 * 60 * 1000 // 24 hours
             },
             
             alerts: {
-                errorThreshold: 10, // Alert after 10 errors in 5 minutes
-                responseTimeThreshold: 5000, // Alert if response time > 5s
-                memoryThreshold: 0.9 // Alert if memory usage > 90%
+                cpu: { threshold: 80, duration: 300000 }, // 80% for 5 minutes
+                memory: { threshold: 85, duration: 300000 }, // 85% for 5 minutes
+                disk: { threshold: 90, duration: 600000 }, // 90% for 10 minutes
+                errorRate: { threshold: 5, duration: 300000 }, // 5% for 5 minutes
+                responseTime: { threshold: 2000, duration: 300000 } // 2s for 5 minutes
             }
         };
+    }
+
+    /**
+     * Get file upload configuration
+     */
+    static getUploadConfig() {
+        return {
+            maxFileSize: 10 * 1024 * 1024, // 10MB
+            allowedMimeTypes: [
+                'application/pdf',
+                'application/msword',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'text/plain'
+            ],
+            uploadPath: process.env.UPLOAD_PATH || 'uploads/',
+            tempPath: process.env.TEMP_PATH || 'temp/',
+            cleanupInterval: 60 * 60 * 1000, // 1 hour
+            tempFileMaxAge: 24 * 60 * 60 * 1000 // 24 hours
+        };
+    }
+
+    /**
+     * Initialize production optimizations
+     */
+    static initializeProduction(app) {
+        if (process.env.NODE_ENV !== 'production') {
+            return;
+        }
+
+        // Set production-specific Express settings
+        app.set('env', 'production');
+        app.set('x-powered-by', false);
+        
+        // Configure server timeouts
+        const serverConfig = this.getServerConfig();
+        app.use((req, res, next) => {
+            req.setTimeout(serverConfig.timeout);
+            res.setTimeout(serverConfig.timeout);
+            next();
+        });
+
+        // Add production middleware
+        this.configureSecurityMiddleware(app);
+
+        console.log('✅ Production optimizations initialized');
     }
 }
 

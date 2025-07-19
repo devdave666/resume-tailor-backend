@@ -1,0 +1,61 @@
+# Docker Compose override for development environment
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.8'
+
+services:
+  # Development app service with hot reload
+  app:
+    build:
+      target: builder
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+    volumes:
+      # Mount source code for hot reload
+      - .:/app
+      - /app/node_modules
+      - app_logs:/app/logs
+    command: ["npm", "run", "dev"]
+    ports:
+      - "3000:3000"
+      - "9229:9229"  # Debug port
+
+  # Development database with exposed port
+  postgres:
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=resume_tailor_dev
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+
+  # Development Redis
+  redis:
+    ports:
+      - "6379:6379"
+
+  # pgAdmin for database management (development only)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: resume-tailor-pgadmin
+    restart: unless-stopped
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@example.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - resume-tailor-network
+
+volumes:
+  postgres_dev_data:
+    driver: local
+  pgadmin_data:
+    driver: local
