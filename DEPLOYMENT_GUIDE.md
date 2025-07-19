@@ -1,618 +1,351 @@
-# Production Deployment Guide
+# AWS Deployment Guide
 
-This guide covers deploying the Resume Tailor backend to production with proper security, monitoring, and scalability.
+This guide covers the complete deployment of the Resume Tailor Backend to AWS using Terraform Infrastructure as Code.
 
-## 🚀 Quick Deployment Checklist
+## Prerequisites
 
-### Prerequisites
-- [ ] Node.js 18+ installed
-- [ ] PostgreSQL 14+ database
-- [ ] Domain name and SSL certificate
-- [ ] Stripe account (live keys)
-- [ ] Google Gemini API key
-- [ ] Load balancer/reverse proxy (Nginx/Apache)
+### Required Tools
 
-### Environment Setup
-- [ ] All environment variables configured
-- [ ] Database migrations run
-- [ ] SSL/TLS certificates installed
-- [ ] Firewall rules configured
-- [ ] Monitoring tools setup
+1. **AWS CLI v2**
+   ```bash
+   # Install AWS CLI
+   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+   unzip awscliv2.zip
+   sudo ./aws/install
+   
+   # Configure AWS credentials
+   aws configure
+   ```
 
-## 🔧 Environment Configuration
+2. **Terraform >= 1.0**
+   ```bash
+   # Install Terraform
+   wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
+   unzip terraform_1.6.0_linux_amd64.zip
+   sudo mv terraform /usr/local/bin/
+   ```
 
-### Required Environment Variables
+3. **Docker**
+   ```bash
+   # Install Docker
+   curl -fsSL https://get.docker.com -o get-docker.sh
+   sh get-docker.sh
+   sudo usermod -aG docker $USER
+   ```
+
+### AWS Account Setup
+
+1. **AWS Account**: Active AWS account with billing enabled
+2. **IAM Permissions**: Administrator access or specific permissions for:
+   - EC2, VPC, ELB, Auto Scaling
+   - RDS, ElastiCache
+   - S3, CloudWatch, Secrets Manager
+   - IAM roles and policies
+
+3. **Domain (Optional)**: Registered domain for custom URL
+4. **SSL Certificate (Optional)**: ACM certificate for HTTPS
+
+## Quick Deployment
+
+### 1. Configure Environment
 
 ```bash
-# Server Configuration
-NODE_ENV=production
-PORT=3000
-HOST=0.0.0.0
+# Clone and navigate to infrastructure directory
+cd infrastructure
+
+# Copy and customize Terraform variables
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# Edit terraform.tfvars with your specific values
+```
+
+### 2. Deploy Infrastructure
+
+**Linux/Mac:**
+```bash
+# Make script executable
+chmod +x deploy.sh
+
+# Deploy to production
+./deploy.sh prod us-east-1
+```
+
+**Windows PowerShell:**
+```powershell
+# Deploy to production
+.\deploy.ps1 -Environment prod -AwsRegion us-east-1
+```
+
+### 3. Update Application Secrets
+
+After deployment, update the application secrets in AWS Secrets Manager with your actual API keys:
+
+- `GEMINI_API_KEY`: Your Google Gemini API key
+- `STRIPE_SECRET_KEY`: Your Stripe secret key
+- `STRIPE_WEBHOOK_SECRET`: Your Stripe webhook secret
+- `JWT_SECRET`: Strong random string for JWT signing
+- `PDF_CO_API_KEY`: Your PDF.co API key (if used)
+
+## Manual Deployment Steps
+
+### 1. Setup Terraform Backend
+
+```bash
+cd infrastructure/terraform
+
+# Initialize Terraform
+terraform init
+
+# Create backend configuration (done automatically by deploy script)
+```
+
+### 2. Configure Variables
+
+Edit `terraform/terraform.tfvars`:
+
+```hcl
+# Basic Configuration
+project_name = "resume-tailor"
+environment  = "prod"
+aws_region   = "us-east-1"
+
+# Instance Configuration
+instance_type    = "t3.medium"
+min_size         = 2
+max_size         = 10
+desired_capacity = 2
 
 # Database Configuration
-DB_HOST=your-db-host
+db_instance_class = "db.t3.micro"
+db_name          = "resume_tailor"
+db_username      = "postgres"
+
+# Domain Configuration (optional)
+domain_name     = "api.your-domain.com"
+certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+# Security
+ssh_key_name = "your-ec2-key-pair"
+```
+
+### 3. Plan and Apply Infrastructure
+
+```bash
+# Validate configuration
+terraform validate
+
+# Plan deployment
+terraform plan -var-file="terraform.tfvars"
+
+# Apply deployment
+terraform apply -var-file="terraform.tfvars"
+```
+
+### 4. Build and Deploy Application
+
+```bash
+# Build Docker image
+docker build -t resume-tailor-backend:latest ..
+
+# Tag for ECR
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ECR_URI="${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/resume-tailor-backend"
+docker tag resume-tailor-backend:latest ${ECR_URI}:latest
+
+# Push to ECR
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${ECR_URI}
+docker push ${ECR_URI}:latest
+```
+
+## Infrastructure Components
+
+### Network Architecture
+
+- **VPC**: Isolated network with public, private, and database subnets
+- **Internet Gateway**: Internet access for public subnets
+- **NAT Gateways**: Outbound internet access for private subnets
+- **Route Tables**: Traffic routing configuration
+
+### Compute Resources
+
+- **Application Load Balancer**: Distributes traffic across EC2 instances
+- **Auto Scaling Group**: Automatically scales EC2 instances based on demand
+- **Launch Template**: Defines EC2 instance configuration
+- **Security Groups**: Network-level firewall rules
+
+### Database and Storage
+
+- **RDS PostgreSQL**: Managed database with automated backups
+- **ElastiCache Redis**: In-memory caching and session storage
+- **S3 Buckets**: File storage and application logs
+- **Secrets Manager**: Secure storage for sensitive configuration
+
+### Monitoring and Logging
+
+- **CloudWatch**: Metrics, logs, and alarms
+- **CloudWatch Dashboard**: Visual monitoring interface
+- **Auto Scaling Policies**: CPU-based scaling triggers
+- **Health Checks**: Application and infrastructure monitoring
+
+## Configuration Management
+
+### Environment Variables
+
+The application uses environment variables for configuration:
+
+```bash
+# Database
+DB_HOST=your-rds-endpoint
 DB_PORT=5432
-DB_NAME=resume_tailor_prod
-DB_USER=resume_tailor_user
-DB_PASSWORD=your-secure-db-password
+DB_NAME=resume_tailor
+DB_USER=postgres
+DB_PASSWORD=from-secrets-manager
 
-# SSL Database Connection (recommended for production)
-DB_SSL_CA=/path/to/ca-certificate.crt
-DB_SSL_KEY=/path/to/client-key.key
-DB_SSL_CERT=/path/to/client-cert.crt
+# Redis
+REDIS_HOST=your-elasticache-endpoint
+REDIS_PORT=6379
 
-# Authentication
-JWT_SECRET=your-very-secure-jwt-secret-at-least-32-characters
-JWT_EXPIRES_IN=24h
+# Application
+NODE_ENV=production
+PORT=3000
+JWT_SECRET=from-secrets-manager
 
-# API Keys
-GEMINI_API_KEY=your-production-gemini-api-key
-PDF_CO_API_KEY=your-pdf-co-api-key
-
-# Stripe (LIVE KEYS for production)
-STRIPE_SECRET_KEY=sk_live_your_live_stripe_secret_key
-STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
-
-# CORS and Security
-ALLOWED_ORIGINS=https://yourdomain.com,chrome-extension://your-extension-id
-CLIENT_URL=https://yourdomain.com
-
-# Logging
-LOG_LEVEL=info
-
-# Optional: Force HTTPS
-FORCE_HTTPS=true
-
-# Optional: Session Configuration
-SESSION_SECRET=your-session-secret
+# External APIs
+GEMINI_API_KEY=from-secrets-manager
+STRIPE_SECRET_KEY=from-secrets-manager
 ```
 
-### Environment Variable Security
-
-```bash
-# Set proper file permissions
-chmod 600 .env
-
-# Use environment variable management tools
-# - AWS Systems Manager Parameter Store
-# - HashiCorp Vault
-# - Kubernetes Secrets
-# - Docker Secrets
-```
+### Secrets Management
 
-## 🗄️ Database Setup
-
-### 1. PostgreSQL Installation
-
-```bash
-# Ubuntu/Debian
-sudo apt update
-sudo apt install postgresql postgresql-contrib
-
-# CentOS/RHEL
-sudo yum install postgresql-server postgresql-contrib
-sudo postgresql-setup initdb
-
-# Start and enable PostgreSQL
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
-```
-
-### 2. Database Configuration
-
-```sql
--- Connect as postgres user
-sudo -u postgres psql
-
--- Create production database and user
-CREATE DATABASE resume_tailor_prod;
-CREATE USER resume_tailor_user WITH PASSWORD 'your-secure-password';
-
--- Grant privileges
-GRANT ALL PRIVILEGES ON DATABASE resume_tailor_prod TO resume_tailor_user;
-GRANT ALL ON SCHEMA public TO resume_tailor_user;
-
--- Enable UUID extension
-\c resume_tailor_prod
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
-\q
-```
-
-### 3. SSL Configuration
-
-```bash
-# Enable SSL in postgresql.conf
-ssl = on
-ssl_cert_file = 'server.crt'
-ssl_key_file = 'server.key'
-ssl_ca_file = 'ca.crt'
-
-# Update pg_hba.conf for SSL connections
-hostssl all all 0.0.0.0/0 md5
-```
-
-### 4. Run Migrations
-
-```bash
-# Set environment variables
-export NODE_ENV=production
-export DB_HOST=your-db-host
-# ... other variables
-
-# Run database setup
-npm run setup-db
-```
-
-## 🔒 Security Configuration
-
-### 1. Firewall Setup
-
-```bash
-# Ubuntu/Debian (UFW)
-sudo ufw allow ssh
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 3000/tcp  # Application port
-sudo ufw enable
-
-# CentOS/RHEL (firewalld)
-sudo firewall-cmd --permanent --add-service=ssh
-sudo firewall-cmd --permanent --add-service=http
-sudo firewall-cmd --permanent --add-service=https
-sudo firewall-cmd --permanent --add-port=3000/tcp
-sudo firewall-cmd --reload
-```
-
-### 2. SSL/TLS Certificate
-
-```bash
-# Using Let's Encrypt (Certbot)
-sudo apt install certbot
-sudo certbot certonly --standalone -d yourdomain.com
-
-# Or use your certificate provider
-# Place certificates in /etc/ssl/certs/
-```
-
-### 3. Nginx Reverse Proxy
-
-```nginx
-# /etc/nginx/sites-available/resume-tailor
-server {
-    listen 80;
-    server_name yourdomain.com;
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name yourdomain.com;
-
-    # SSL Configuration
-    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-
-    # Security Headers
-    add_header X-Frame-Options DENY;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-
-    # Rate Limiting
-    limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
-    limit_req zone=api burst=20 nodelay;
-
-    # File Upload Limits
-    client_max_body_size 10M;
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-        
-        # Timeouts
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
-
-    # Health check endpoint
-    location /health {
-        proxy_pass http://localhost:3000/health;
-        access_log off;
-    }
-}
-```
-
-## 🚀 Application Deployment
-
-### 1. Using PM2 (Process Manager)
-
-```bash
-# Install PM2 globally
-npm install -g pm2
-
-# Create ecosystem file
-cat > ecosystem.config.js << EOF
-module.exports = {
-  apps: [{
-    name: 'resume-tailor-backend',
-    script: 'server.js',
-    instances: 'max',
-    exec_mode: 'cluster',
-    env: {
-      NODE_ENV: 'development'
-    },
-    env_production: {
-      NODE_ENV: 'production',
-      PORT: 3000
-    },
-    error_file: './logs/err.log',
-    out_file: './logs/out.log',
-    log_file: './logs/combined.log',
-    time: true,
-    max_memory_restart: '1G',
-    node_args: '--max-old-space-size=1024'
-  }]
-};
-EOF
-
-# Start application
-pm2 start ecosystem.config.js --env production
-
-# Save PM2 configuration
-pm2 save
-pm2 startup
-```
-
-### 2. Using Docker
-
-```dockerfile
-# Dockerfile
-FROM node:18-alpine
-
-# Create app directory
-WORKDIR /usr/src/app
-
-# Install app dependencies
-COPY package*.json ./
-RUN npm ci --only=production
-
-# Bundle app source
-COPY . .
-
-# Create logs directory
-RUN mkdir -p logs
-
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
-USER nodejs
-
-# Expose port
-EXPOSE 3000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node healthcheck.js
-
-CMD ["node", "server.js"]
-```
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  app:
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-    env_file:
-      - .env
-    depends_on:
-      - postgres
-    restart: unless-stopped
-    volumes:
-      - ./logs:/usr/src/app/logs
-
-  postgres:
-    image: postgres:14-alpine
-    environment:
-      POSTGRES_DB: resume_tailor_prod
-      POSTGRES_USER: resume_tailor_user
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
-
-volumes:
-  postgres_data:
-```
-
-### 3. Using Kubernetes
-
-```yaml
-# k8s-deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: resume-tailor-backend
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: resume-tailor-backend
-  template:
-    metadata:
-      labels:
-        app: resume-tailor-backend
-    spec:
-      containers:
-      - name: resume-tailor-backend
-        image: your-registry/resume-tailor-backend:latest
-        ports:
-        - containerPort: 3000
-        env:
-        - name: NODE_ENV
-          value: "production"
-        envFrom:
-        - secretRef:
-            name: resume-tailor-secrets
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "250m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 3000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 3000
-          initialDelaySeconds: 5
-          periodSeconds: 5
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: resume-tailor-service
-spec:
-  selector:
-    app: resume-tailor-backend
-  ports:
-  - port: 80
-    targetPort: 3000
-  type: LoadBalancer
-```
-
-## 📊 Monitoring and Logging
-
-### 1. Health Check Endpoint
-
-The application includes a health check endpoint at `/health` that monitors:
-- Database connectivity
-- External API availability
-- Memory usage
-- Response times
-
-### 2. Logging Configuration
-
-```bash
-# Create logs directory
-mkdir -p logs
-
-# Set proper permissions
-chmod 755 logs
-
-# Log rotation with logrotate
-cat > /etc/logrotate.d/resume-tailor << EOF
-/path/to/your/app/logs/*.log {
-    daily
-    missingok
-    rotate 52
-    compress
-    delaycompress
-    notifempty
-    create 644 nodejs nodejs
-    postrotate
-        pm2 reload resume-tailor-backend
-    endscript
-}
-EOF
-```
-
-### 3. Monitoring Tools
-
-```bash
-# Install monitoring tools
-npm install -g pm2-logrotate
-pm2 install pm2-server-monit
-
-# Configure alerts
-pm2 set pm2-server-monit:conf '{"email": "admin@yourdomain.com"}'
-```
-
-## 🔄 CI/CD Pipeline
-
-### GitHub Actions Example
-
-```yaml
-# .github/workflows/deploy.yml
-name: Deploy to Production
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-        cache: 'npm'
-    
-    - name: Install dependencies
-      run: npm ci
-    
-    - name: Run tests
-      run: npm test
-    
-    - name: Build application
-      run: npm run build
-    
-    - name: Deploy to server
-      uses: appleboy/ssh-action@v0.1.5
-      with:
-        host: ${{ secrets.HOST }}
-        username: ${{ secrets.USERNAME }}
-        key: ${{ secrets.SSH_KEY }}
-        script: |
-          cd /path/to/your/app
-          git pull origin main
-          npm ci --only=production
-          npm run migrate
-          pm2 reload resume-tailor-backend
-```
-
-## 🚨 Backup and Recovery
-
-### 1. Database Backups
-
-```bash
-# Create backup script
-cat > backup-db.sh << EOF
-#!/bin/bash
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="/backups/postgresql"
-mkdir -p $BACKUP_DIR
-
-pg_dump -h $DB_HOST -U $DB_USER -d $DB_NAME > $BACKUP_DIR/resume_tailor_$DATE.sql
-
-# Keep only last 7 days of backups
-find $BACKUP_DIR -name "*.sql" -mtime +7 -delete
-EOF
-
-chmod +x backup-db.sh
-
-# Add to crontab for daily backups
-echo "0 2 * * * /path/to/backup-db.sh" | crontab -
-```
-
-### 2. Application Backups
-
-```bash
-# Backup application files
-tar -czf app-backup-$(date +%Y%m%d).tar.gz \
-  --exclude=node_modules \
-  --exclude=logs \
-  --exclude=.git \
-  /path/to/your/app
-```
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-1. **Database Connection Errors**
-   ```bash
-   # Check PostgreSQL status
-   sudo systemctl status postgresql
-   
-   # Check connection
-   psql -h $DB_HOST -U $DB_USER -d $DB_NAME
-   ```
-
-2. **SSL Certificate Issues**
-   ```bash
-   # Check certificate validity
-   openssl x509 -in /path/to/cert.pem -text -noout
-   
-   # Test SSL connection
-   openssl s_client -connect yourdomain.com:443
-   ```
-
-3. **Memory Issues**
-   ```bash
-   # Monitor memory usage
-   pm2 monit
-   
-   # Increase Node.js memory limit
-   node --max-old-space-size=2048 server.js
-   ```
-
-4. **Rate Limiting Issues**
-   ```bash
-   # Check rate limit logs
-   tail -f logs/combined.log | grep "RATE_LIMIT"
-   
-   # Adjust rate limits in production.js
-   ```
+Sensitive values are stored in AWS Secrets Manager:
+
+1. **Database Password**: Auto-generated and stored securely
+2. **Application Secrets**: API keys and JWT secret
+3. **Automatic Rotation**: Can be configured for enhanced security
+
+## Monitoring and Maintenance
+
+### CloudWatch Monitoring
+
+- **Application Metrics**: Request count, response time, error rates
+- **Infrastructure Metrics**: CPU, memory, disk usage
+- **Database Metrics**: Connection count, query performance
+- **Custom Alarms**: Automated alerts for critical issues
+
+### Log Management
+
+- **Application Logs**: Centralized in CloudWatch Logs
+- **Access Logs**: Load balancer access patterns
+- **System Logs**: EC2 instance system events
+- **Log Retention**: Configurable retention periods
+
+### Backup and Recovery
+
+- **Database Backups**: Automated daily backups with point-in-time recovery
+- **Configuration Backups**: Terraform state stored in S3
+- **Disaster Recovery**: Multi-AZ deployment for high availability
+
+## Security Features
+
+### Network Security
+
+- **Private Subnets**: Application servers not directly accessible from internet
+- **Security Groups**: Restrictive firewall rules
+- **NACLs**: Additional network-level security
+- **VPC Flow Logs**: Network traffic monitoring
+
+### Data Security
+
+- **Encryption at Rest**: All storage encrypted
+- **Encryption in Transit**: HTTPS/TLS for all communications
+- **Secrets Management**: No hardcoded credentials
+- **IAM Roles**: Least privilege access principles
+
+### Application Security
+
+- **Security Headers**: Implemented in load balancer and application
+- **Rate Limiting**: Protection against abuse
+- **Input Validation**: Comprehensive request validation
+- **Authentication**: JWT-based user authentication
+
+## Scaling and Performance
+
+### Auto Scaling
+
+- **Horizontal Scaling**: Automatic EC2 instance scaling
+- **Database Scaling**: Read replicas for production
+- **Cache Scaling**: Redis cluster for high availability
+- **Load Balancing**: Traffic distribution across instances
 
 ### Performance Optimization
 
-1. **Enable Gzip Compression** (already configured)
-2. **Use CDN** for static assets
-3. **Database Connection Pooling** (already configured)
-4. **Caching** with Redis (optional)
-5. **Load Balancing** with multiple instances
+- **CDN Integration**: CloudFlare for static content
+- **Database Optimization**: Connection pooling and query optimization
+- **Caching Strategy**: Redis for session and application caching
+- **Compression**: Gzip compression for responses
 
-## 📋 Post-Deployment Checklist
+## Cost Optimization
 
-- [ ] Application starts without errors
-- [ ] Database connection successful
-- [ ] All API endpoints responding
-- [ ] SSL certificate valid
-- [ ] Rate limiting working
-- [ ] File uploads working
-- [ ] Payment processing working
-- [ ] Webhook endpoints accessible
-- [ ] Monitoring alerts configured
-- [ ] Backup system working
-- [ ] Log rotation configured
+### Resource Sizing
 
-## 🆘 Emergency Procedures
+- **Right-sizing**: Appropriate instance types for workload
+- **Reserved Instances**: Cost savings for predictable workloads
+- **Spot Instances**: Cost-effective for non-critical workloads
+- **Storage Optimization**: Lifecycle policies for S3 storage
 
-### Rollback Process
-```bash
-# Using PM2
-pm2 stop resume-tailor-backend
-git checkout previous-stable-commit
-npm ci --only=production
-pm2 start resume-tailor-backend
+### Monitoring Costs
 
-# Using Docker
-docker-compose down
-docker-compose up -d --build previous-tag
-```
+- **Cost Alerts**: Automated notifications for budget thresholds
+- **Resource Tagging**: Detailed cost allocation
+- **Usage Monitoring**: Regular review of resource utilization
+- **Optimization Recommendations**: AWS Cost Explorer insights
 
-### Emergency Contacts
-- Database Admin: [contact]
-- DevOps Team: [contact]
-- Security Team: [contact]
+## Troubleshooting
 
-This deployment guide ensures a secure, scalable, and maintainable production environment for the Resume Tailor backend.
+### Common Issues
+
+1. **Deployment Failures**
+   ```bash
+   # Check Terraform logs
+   terraform plan -detailed-exitcode
+   
+   # Validate configuration
+   terraform validate
+   ```
+
+2. **Application Health Issues**
+   ```bash
+   # Check application logs
+   aws logs tail /aws/ec2/resume-tailor-prod --follow
+   
+   # Check load balancer health
+   aws elbv2 describe-target-health --target-group-arn <target-group-arn>
+   ```
+
+3. **Database Connection Issues**
+   ```bash
+   # Check RDS status
+   aws rds describe-db-instances --db-instance-identifier resume-tailor-prod-db
+   
+   # Check security groups
+   aws ec2 describe-security-groups --group-ids <security-group-id>
+   ```
+
+### Support Resources
+
+- **AWS Documentation**: Comprehensive service documentation
+- **Terraform Documentation**: Infrastructure as Code best practices
+- **CloudWatch Dashboards**: Real-time monitoring and alerting
+- **AWS Support**: Professional support for production workloads
+
+## Next Steps
+
+After successful deployment:
+
+1. **Configure DNS**: Point your domain to the load balancer
+2. **Setup Monitoring**: Configure additional CloudWatch alarms
+3. **Performance Testing**: Load test the application
+4. **Security Audit**: Conduct security assessment
+5. **Backup Testing**: Verify backup and recovery procedures
+6. **Documentation**: Update operational procedures
+
+This deployment provides a production-ready, scalable, and secure infrastructure for the Resume Tailor Backend application.

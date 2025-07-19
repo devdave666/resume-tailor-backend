@@ -1,0 +1,49 @@
+# Example Terraform Variables File
+# Copy this file to terraform.tfvars and customize for your environment
+
+# Basic Configuration
+project_name = "resume-tailor"
+environment  = "prod"
+aws_region   = "us-east-1"
+
+# Network Configuration
+vpc_cidr           = "10.0.0.0/16"
+availability_zones = ["us-east-1a", "us-east-1b", "us-east-1c"]
+
+# EC2 Configuration
+instance_type    = "t3.medium"
+min_size         = 2
+max_size         = 10
+desired_capacity = 2
+
+# Database Configuration
+db_instance_class         = "db.t3.micro"
+db_allocated_storage      = 20
+db_max_allocated_storage  = 100
+db_name                   = "resume_tailor"
+db_username               = "postgres"
+
+# Redis Configuration
+redis_node_type       = "cache.t3.micro"
+redis_num_cache_nodes = 1
+
+# Domain Configuration (optional)
+domain_name     = "your-domain.com"
+certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012"
+
+# Application Configuration
+app_port           = 3000
+health_check_path  = "/health/quick"
+
+# Monitoring Configuration
+enable_detailed_monitoring = true
+log_retention_days        = 30
+
+# Security Configuration
+allowed_cidr_blocks = ["0.0.0.0/0"]
+ssh_key_name       = "your-ec2-key-pair"
+
+# Backup Configuration
+backup_retention_period = 7
+backup_window          = "03:00-04:00"
+maintenance_window     = "sun:04:00-sun:05:00"
