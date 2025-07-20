@@ -1,0 +1,184 @@
+/* Content Script Styles for Resume Tailor Chrome Extension */
+
+/* Extract Button */
+#resume-tailor-extract-btn {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10000;
+    cursor: pointer;
+    animation: slideIn 0.3s ease-out;
+}
+
+.rt-extract-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 25px;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(10px);
+}
+
+.rt-extract-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+}
+
+.rt-extract-btn img {
+    width: 20px;
+    height: 20px;
+    filter: brightness(0) invert(1);
+}
+
+/* Notification */
+#resume-tailor-notification {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    z-index: 10001;
+    animation: slideIn 0.3s ease-out;
+    max-width: 350px;
+}
+
+.rt-notification {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+}
+
+.rt-notification.rt-success {
+    border-left: 4px solid #28a745;
+}
+
+.rt-notification.rt-error {
+    border-left: 4px solid #dc3545;
+}
+
+.rt-notification.rt-info {
+    border-left: 4px solid #17a2b8;
+}
+
+.rt-notification-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    color: #333;
+}
+
+.rt-notification-content img {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.rt-notification-content span {
+    flex: 1;
+    line-height: 1.4;
+}
+
+.rt-notification-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: #999;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.rt-notification-close:hover {
+    background: #f5f5f5;
+    color: #666;
+}
+
+/* Animations */
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    #resume-tailor-extract-btn {
+        top: 10px;
+        right: 10px;
+    }
+    
+    .rt-extract-btn {
+        padding: 10px 14px;
+        font-size: 13px;
+    }
+    
+    .rt-extract-btn img {
+        width: 18px;
+        height: 18px;
+    }
+    
+    #resume-tailor-notification {
+        top: 60px;
+        right: 10px;
+        left: 10px;
+        max-width: none;
+    }
+    
+    .rt-notification-content {
+        padding: 14px;
+        font-size: 13px;
+    }
+}
+
+/* Hide on print */
+@media print {
+    #resume-tailor-extract-btn,
+    #resume-tailor-notification {
+        display: none !important;
+    }
+}
+
+/* Site-specific adjustments */
+
+/* LinkedIn */
+body[class*="linkedin"] #resume-tailor-extract-btn {
+    top: 60px; /* Account for LinkedIn header */
+}
+
+/* Indeed */
+body[class*="indeed"] #resume-tailor-extract-btn {
+    top: 70px; /* Account for Indeed header */
+}
+
+/* Glassdoor */
+body[class*="glassdoor"] #resume-tailor-extract-btn {
+    top: 80px; /* Account for Glassdoor header */
+}
+
+/* Ensure button stays above site elements */
+#resume-tailor-extract-btn {
+    z-index: 999999 !important;
+}
+
+#resume-tailor-notification {
+    z-index: 999998 !important;
+}
