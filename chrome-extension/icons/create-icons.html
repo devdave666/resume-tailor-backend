@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resume Tailor Icon Generator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .icon-preview {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin: 30px 0;
+            flex-wrap: wrap;
+        }
+        .icon-item {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 2px solid #e9ecef;
+        }
+        .icon-item h3 {
+            margin: 10px 0 5px 0;
+            color: #495057;
+            font-size: 14px;
+        }
+        canvas {
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            background: white;
+        }
+        .download-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-top: 8px;
+            transition: transform 0.2s;
+        }
+        .download-btn:hover {
+            transform: translateY(-1px);
+        }
+        .instructions {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 30px;
+            border-left: 4px solid #2196f3;
+        }
+        .instructions h3 {
+            color: #1976d2;
+            margin-top: 0;
+        }
+        .instructions ol {
+            color: #424242;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 Resume Tailor Icon Generator</h1>
+        
+        <div class="icon-preview">
+            <div class="icon-item">
+                <h3>16x16 (Toolbar)</h3>
+                <canvas id="icon16" width="16" height="16"></canvas>
+                <br>
+                <button class="download-btn" onclick="downloadIcon('icon16', 'icon16.png')">Download</button>
+            </div>
+            
+            <div class="icon-item">
+                <h3>32x32 (Toolbar HD)</h3>
+                <canvas id="icon32" width="32" height="32"></canvas>
+                <br>
+                <button class="download-btn" onclick="downloadIcon('icon32', 'icon32.png')">Download</button>
+            </div>
+            
+            <div class="icon-item">
+                <h3>48x48 (Extension Page)</h3>
+                <canvas id="icon48" width="48" height="48"></canvas>
+                <br>
+                <button class="download-btn" onclick="downloadIcon('icon48', 'icon48.png')">Download</button>
+            </div>
+            
+            <div class="icon-item">
+                <h3>128x128 (Chrome Store)</h3>
+                <canvas id="icon128" width="128" height="128"></canvas>
+                <br>
+                <button class="download-btn" onclick="downloadIcon('icon128', 'icon128.png')">Download</button>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <h3>📋 How to Use These Icons</h3>
+            <ol>
+                <li><strong>Download all 4 icons</strong> by clicking the download buttons above</li>
+                <li><strong>Save them</strong> in your <code>chrome-extension/icons/</code> folder</li>
+                <li><strong>Replace the placeholder paths</strong> in your manifest.json (they're already correctly named)</li>
+                <li><strong>Test your extension</strong> by loading it in Chrome</li>
+                <li><strong>Submit to Chrome Web Store</strong> - these icons meet all requirements</li>
+            </ol>
+            
+            <p><strong>Note:</strong> These icons feature a modern gradient design with a document/resume symbol that's perfect for your Resume Tailor extension. They're optimized for all Chrome extension contexts.</p>
+        </div>
+    </div>
+
+    <script>
+        function createIcon(canvasId, size) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            
+            // Set canvas size
+            canvas.width = size;
+            canvas.height = size;
+            
+            // Create gradient background
+            const gradient = ctx.createLinearGradient(0, 0, size, size);
+            gradient.addColorStop(0, '#667eea');
+            gradient.addColorStop(1, '#764ba2');
+            
+            // Draw rounded rectangle background
+            const radius = size * 0.15;
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.roundRect(0, 0, size, size, radius);
+            ctx.fill();
+            
+            // Draw document icon
+            const docWidth = size * 0.5;
+            const docHeight = size * 0.65;
+            const docX = (size - docWidth) / 2;
+            const docY = (size - docHeight) / 2;
+            
+            // Document background
+            ctx.fillStyle = 'white';
+            ctx.fillRect(docX, docY, docWidth, docHeight);
+            
+            // Document fold (top-right corner)
+            const foldSize = size * 0.1;
+            ctx.fillStyle = '#f0f0f0';
+            ctx.beginPath();
+            ctx.moveTo(docX + docWidth - foldSize, docY);
+            ctx.lineTo(docX + docWidth, docY + foldSize);
+            ctx.lineTo(docX + docWidth, docY);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Document lines (text representation)
+            ctx.fillStyle = '#667eea';
+            const lineHeight = size * 0.04;
+            const lineSpacing = size * 0.08;
+            const lineStartX = docX + size * 0.08;
+            const lineWidth = docWidth * 0.7;
+            
+            for (let i = 0; i < 4; i++) {
+                const y = docY + size * 0.15 + (i * lineSpacing);
+                const currentLineWidth = i === 3 ? lineWidth * 0.6 : lineWidth; // Last line shorter
+                ctx.fillRect(lineStartX, y, currentLineWidth, lineHeight);
+            }
+            
+            // Add a small "AI" badge in bottom right
+            if (size >= 32) {
+                const badgeSize = size * 0.25;
+                const badgeX = size - badgeSize - size * 0.05;
+                const badgeY = size - badgeSize - size * 0.05;
+                
+                // Badge background
+                ctx.fillStyle = '#28a745';
+                ctx.beginPath();
+                ctx.arc(badgeX + badgeSize/2, badgeY + badgeSize/2, badgeSize/2, 0, 2 * Math.PI);
+                ctx.fill();
+                
+                // "AI" text
+                ctx.fillStyle = 'white';
+                ctx.font = `bold ${size * 0.12}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('AI', badgeX + badgeSize/2, badgeY + badgeSize/2);
+            }
+        }
+        
+        function downloadIcon(canvasId, filename) {
+            const canvas = document.getElementById(canvasId);
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+        
+        // Add roundRect method for older browsers
+        if (!CanvasRenderingContext2D.prototype.roundRect) {
+            CanvasRenderingContext2D.prototype.roundRect = function(x, y, width, height, radius) {
+                this.moveTo(x + radius, y);
+                this.lineTo(x + width - radius, y);
+                this.quadraticCurveTo(x + width, y, x + width, y + radius);
+                this.lineTo(x + width, y + height - radius);
+                this.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+                this.lineTo(x + radius, y + height);
+                this.quadraticCurveTo(x, y + height, x, y + height - radius);
+                this.lineTo(x, y + radius);
+                this.quadraticCurveTo(x, y, x + radius, y);
+                this.closePath();
+            };
+        }
+        
+        // Generate all icons when page loads
+        window.onload = function() {
+            createIcon('icon16', 16);
+            createIcon('icon32', 32);
+            createIcon('icon48', 48);
+            createIcon('icon128', 128);
+        };
+    </script>
+</body>
+</html>
