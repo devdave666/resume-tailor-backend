@@ -15,7 +15,7 @@
     "https://*.monster.com/*",
     "https://*.ziprecruiter.com/*",
     "https://*.careerbuilder.com/*",
-    "https://your-vercel-app.vercel.app/*"
+    "https://resume-tailor-be8f8dbok-devkumar-daves-projects.vercel.app/*"
   ],
   "background": {
     "service_worker": "background.js"

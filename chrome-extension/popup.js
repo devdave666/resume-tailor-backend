@@ -3,7 +3,7 @@
 
 class ResumeTrailerApp {
     constructor() {
-        this.apiUrl = 'https://your-vercel-app.vercel.app/api'; // Replace with your Vercel URL
+        this.apiUrl = 'https://resume-tailor-be8f8dbok-devkumar-daves-projects.vercel.app/api';
         this.currentUser = null;
         this.currentSession = null;
         this.init();
