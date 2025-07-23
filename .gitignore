@@ -1,3 +1,6 @@
 node_modules 
 .env
 .vercel
+# Environment setup scripts with sensitive data
+setup-vercel-env.bat
+setup-vercel-env.ps1
