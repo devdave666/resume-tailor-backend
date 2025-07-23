@@ -10,141 +10,111 @@
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <img src="icons/icon32.png" alt="Resume Tailor" class="logo">
-            <h1>Resume Tailor</h1>
-            <div class="token-display" id="tokenDisplay">
-                <span class="token-count" id="tokenCount">-</span>
-                <span class="token-label">tokens</span>
+            <div class="logo">
+                <h1>📄 Resume Tailor</h1>
+                <p>AI-Powered Resume Generator</p>
+                <div id="test-mode-badge" class="test-badge hidden">🧪 TEST MODE</div>
             </div>
         </div>
 
-        <!-- Auth Section -->
-        <div class="auth-section" id="authSection">
+        <!-- Auth Section (shown when not logged in) -->
+        <div id="auth-section" class="section hidden">
             <div class="auth-tabs">
-                <button class="tab-btn active" data-tab="login">Login</button>
-                <button class="tab-btn" data-tab="register">Sign Up</button>
+                <button id="login-tab" class="tab-btn active">Login</button>
+                <button id="register-tab" class="tab-btn">Sign Up</button>
             </div>
             
-            <div class="tab-content active" id="loginTab">
-                <form id="loginForm">
-                    <input type="email" id="loginEmail" placeholder="Email" required>
-                    <input type="password" id="loginPassword" placeholder="Password" required>
-                    <button type="submit" class="btn-primary">Login</button>
-                </form>
-            </div>
+            <form id="auth-form">
+                <input type="email" id="email" placeholder="Email" required>
+                <input type="password" id="password" placeholder="Password" required>
+                <button type="submit" id="auth-submit">Login</button>
+            </form>
             
-            <div class="tab-content" id="registerTab">
-                <form id="registerForm">
-                    <input type="email" id="registerEmail" placeholder="Email" required>
-                    <input type="password" id="registerPassword" placeholder="Password" required>
-                    <button type="submit" class="btn-primary">Sign Up & Get 3 Free Tokens</button>
-                </form>
+            <div class="auth-info">
+                <p>💼 Professional AI resume tailoring - Buy tokens to get started!</p>
             </div>
         </div>
 
-        <!-- Main App Section -->
-        <div class="app-section hidden" id="appSection">
-            <!-- Job Detection -->
-            <div class="job-section">
-                <div class="section-header">
-                    <h3>📋 Job Description</h3>
-                    <button class="btn-secondary" id="extractBtn">Extract from Page</button>
+        <!-- Main Section (shown when logged in) -->
+        <div id="main-section" class="section">
+            <!-- User Info -->
+            <div class="user-info">
+                <div class="token-balance">
+                    <span class="tokens">🪙 <span id="token-count">0</span> tokens</span>
+                    <button id="buy-tokens" class="buy-btn">Buy More</button>
                 </div>
-                <textarea id="jobDescription" placeholder="Paste job description here or click 'Extract from Page' to auto-detect from job sites like LinkedIn, Indeed, etc."></textarea>
+            </div>
+
+            <!-- Job Detection -->
+            <div class="job-detection">
+                <div id="job-detected" class="job-card hidden">
+                    <h3>🎯 Job Detected</h3>
+                    <p id="job-title">Loading...</p>
+                    <p id="job-company">Loading...</p>
+                    <button id="extract-job" class="btn-primary">Extract Job Details</button>
+                </div>
+                
+                <div id="no-job" class="job-card">
+                    <h3>📋 Manual Job Entry</h3>
+                    <p>Paste the job description below:</p>
+                    <textarea id="manual-job" placeholder="Paste job description here..."></textarea>
+                </div>
             </div>
 
             <!-- Resume Upload -->
-            <div class="resume-section">
-                <div class="section-header">
-                    <h3>📄 Your Resume</h3>
+            <div class="upload-section">
+                <h3>📄 Upload Your Resume</h3>
+                <div class="upload-area" id="upload-area">
+                    <input type="file" id="resume-file" accept=".pdf,.doc,.docx,.txt" hidden>
+                    <div class="upload-content">
+                        <p>📁 Click to upload or drag & drop</p>
+                        <p class="upload-formats">PDF, DOC, DOCX, TXT</p>
+                    </div>
                 </div>
-                <div class="file-upload" id="fileUpload">
-                    <input type="file" id="resumeFile" accept=".pdf,.docx,.txt" hidden>
-                    <div class="upload-area" id="uploadArea">
-                        <div class="upload-icon">📁</div>
-                        <div class="upload-text">
-                            <strong>Click to upload</strong> or drag & drop
-                            <br><small>PDF, DOCX, or TXT (max 5MB)</small>
-                        </div>
-                    </div>
-                    <div class="file-info hidden" id="fileInfo">
-                        <span class="file-name" id="fileName"></span>
-                        <button class="remove-file" id="removeFile">✕</button>
-                    </div>
+                <div id="file-info" class="file-info hidden">
+                    <span id="file-name"></span>
+                    <button id="remove-file">✕</button>
                 </div>
             </div>
 
             <!-- Generate Button -->
             <div class="generate-section">
-                <button class="btn-generate" id="generateBtn" disabled>
-                    <span class="btn-text">Tailor Resume (1 token)</span>
-                    <span class="btn-loader hidden">⏳ Generating...</span>
+                <button id="generate-btn" class="btn-generate" disabled>
+                    <span class="btn-text">🚀 Generate Tailored Resume</span>
+                    <span class="btn-cost">(1 token)</span>
                 </button>
-                <p class="cost-info">Cost: 1 token (~$0.50) • Takes 10-30 seconds</p>
             </div>
 
             <!-- Results -->
-            <div class="results-section hidden" id="resultsSection">
-                <div class="section-header">
-                    <h3>✨ Tailored Resume</h3>
-                    <div class="result-actions">
-                        <button class="btn-secondary" id="copyBtn">Copy</button>
-                        <button class="btn-secondary" id="downloadBtn">Download</button>
-                    </div>
+            <div id="results-section" class="results hidden">
+                <h3>✨ Your Tailored Documents</h3>
+                <div class="result-tabs">
+                    <button id="resume-tab" class="result-tab active">Resume</button>
+                    <button id="cover-tab" class="result-tab">Cover Letter</button>
                 </div>
                 <div class="result-content">
-                    <textarea id="resultText" readonly></textarea>
+                    <div id="resume-content" class="result-text"></div>
+                    <div id="cover-content" class="result-text hidden"></div>
+                </div>
+                <div class="result-actions">
+                    <button id="copy-result" class="btn-secondary">📋 Copy</button>
+                    <button id="download-result" class="btn-secondary">💾 Download</button>
                 </div>
             </div>
 
-            <!-- Buy Tokens -->
-            <div class="tokens-section">
-                <div class="section-header">
-                    <h3>💎 Need More Tokens?</h3>
-                </div>
-                <div class="token-packages">
-                    <div class="package" data-package="starter">
-                        <div class="package-name">Starter</div>
-                        <div class="package-tokens">10 tokens</div>
-                        <div class="package-price">$5.00</div>
-                        <div class="package-per-token">$0.50 each</div>
-                    </div>
-                    <div class="package popular" data-package="popular">
-                        <div class="package-badge">Most Popular</div>
-                        <div class="package-name">Popular</div>
-                        <div class="package-tokens">35 tokens</div>
-                        <div class="package-price">$15.00</div>
-                        <div class="package-per-token">$0.43 each</div>
-                        <div class="package-savings">Save 14%</div>
-                    </div>
-                    <div class="package" data-package="pro">
-                        <div class="package-name">Pro</div>
-                        <div class="package-tokens">60 tokens</div>
-                        <div class="package-price">$25.00</div>
-                        <div class="package-per-token">$0.42 each</div>
-                        <div class="package-savings">Save 16%</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Footer -->
-            <div class="footer">
-                <button class="btn-link" id="logoutBtn">Logout</button>
-                <span class="divider">•</span>
-                <button class="btn-link" id="supportBtn">Support</button>
+            <!-- Loading -->
+            <div id="loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Generating your tailored resume...</p>
             </div>
         </div>
 
-        <!-- Loading Overlay -->
-        <div class="loading-overlay hidden" id="loadingOverlay">
-            <div class="spinner"></div>
-            <div class="loading-text">Processing...</div>
-        </div>
-
-        <!-- Toast Notifications -->
-        <div class="toast hidden" id="toast">
-            <span class="toast-message" id="toastMessage"></span>
-            <button class="toast-close" id="toastClose">✕</button>
+        <!-- Footer -->
+        <div class="footer">
+            <div class="pricing-info">
+                <p>💰 Buy Tokens: $5 for 10 • $15 for 35 • $25 for 60 (Best Value!)</p>
+            </div>
+            <button id="logout" class="logout-btn hidden">Logout</button>
         </div>
     </div>
 

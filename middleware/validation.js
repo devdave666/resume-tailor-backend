@@ -2,6 +2,7 @@
 // Comprehensive input validation middleware
 
 const { body, param, query, validationResult } = require('express-validator');
+const rateLimit = require('express-rate-limit');
 const { logger } = require('../config/database');
 
 class ValidationMiddleware {

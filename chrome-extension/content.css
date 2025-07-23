@@ -1,184 +1,282 @@
-/* Content Script Styles for Resume Tailor Chrome Extension */
+/* Resume Tailor Content Script Styles - Modern Design */
 
-/* Extract Button */
-#resume-tailor-extract-btn {
+.resume-tailor-button {
+    display: inline-flex;
+    align-items: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 14px 24px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    border: none;
+    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.25);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    margin: 12px 0;
+    position: relative;
+    z-index: 10000;
+    backdrop-filter: blur(10px);
+    overflow: hidden;
+}
+
+.resume-tailor-button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+    transition: left 0.5s;
+}
+
+.resume-tailor-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(102, 126, 234, 0.4);
+}
+
+.resume-tailor-button:hover::before {
+    left: 100%;
+}
+
+.resume-tailor-button:active {
+    transform: translateY(-1px);
+}
+
+/* Button States */
+.resume-tailor-button.rt-loading {
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    cursor: wait;
+}
+
+.resume-tailor-button.rt-success {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    cursor: default;
+}
+
+.resume-tailor-button.rt-error {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    cursor: default;
+}
+
+.rt-button-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    z-index: 1;
+}
+
+.rt-icon {
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+}
+
+.rt-text {
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+.rt-badge {
+    background: rgba(255, 255, 255, 0.25);
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    backdrop-filter: blur(5px);
+}
+
+.rt-instruction {
+    background: rgba(255, 255, 255, 0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+/* Spinner Animation */
+.rt-spinner {
+    display: inline-block;
+    animation: rt-spin 1s linear infinite;
+    font-size: 18px;
+}
+
+@keyframes rt-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Notification Styles */
+.rt-notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+    z-index: 10001;
+    transform: translateX(400px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    max-width: 350px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.rt-notification--show {
+    transform: translateX(0);
+}
+
+.rt-notification--success {
+    border-left: 4px solid #10b981;
+}
+
+.rt-notification--error {
+    border-left: 4px solid #ef4444;
+}
+
+.rt-notification__content {
+    display: flex;
+    align-items: center;
+    padding: 16px 20px;
+    gap: 12px;
+}
+
+.rt-notification__icon {
+    font-size: 18px;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+
+.rt-notification--success .rt-notification__icon {
+    color: #10b981;
+}
+
+.rt-notification--error .rt-notification__icon {
+    color: #ef4444;
+}
+
+.rt-notification__message {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 500;
+    color: #374151;
+    line-height: 1.4;
+}
+
+.rt-notification__close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: #9ca3af;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.rt-notification__close:hover {
+    background: #f3f4f6;
+    color: #374151;
+}
+
+.rt-button-container {
+    margin: 16px 0;
+    display: flex;
+    justify-content: flex-start;
+}
+
+.rt-button-container.rt-floating {
     position: fixed;
     top: 20px;
     right: 20px;
     z-index: 10000;
-    cursor: pointer;
-    animation: slideIn 0.3s ease-out;
-}
-
-.rt-extract-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 12px 16px;
-    border-radius: 25px;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    transition: all 0.2s ease;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    backdrop-filter: blur(10px);
-}
-
-.rt-extract-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
-}
-
-.rt-extract-btn img {
-    width: 20px;
-    height: 20px;
-    filter: brightness(0) invert(1);
-}
-
-/* Notification */
-#resume-tailor-notification {
-    position: fixed;
-    top: 80px;
-    right: 20px;
-    z-index: 10001;
-    animation: slideIn 0.3s ease-out;
-    max-width: 350px;
-}
-
-.rt-notification {
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    overflow: hidden;
-}
-
-.rt-notification.rt-success {
-    border-left: 4px solid #28a745;
-}
-
-.rt-notification.rt-error {
-    border-left: 4px solid #dc3545;
-}
-
-.rt-notification.rt-info {
-    border-left: 4px solid #17a2b8;
-}
-
-.rt-notification-content {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 16px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-size: 14px;
-    color: #333;
-}
-
-.rt-notification-content img {
-    width: 24px;
-    height: 24px;
-    flex-shrink: 0;
-}
-
-.rt-notification-content span {
-    flex: 1;
-    line-height: 1.4;
-}
-
-.rt-notification-close {
-    background: none;
-    border: none;
-    font-size: 18px;
-    color: #999;
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 4px;
-    transition: all 0.2s;
-    flex-shrink: 0;
-}
-
-.rt-notification-close:hover {
-    background: #f5f5f5;
-    color: #666;
-}
-
-/* Animations */
-@keyframes slideIn {
-    from {
-        transform: translateX(100%);
-        opacity: 0;
-    }
-    to {
-        transform: translateX(0);
-        opacity: 1;
-    }
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-    #resume-tailor-extract-btn {
-        top: 10px;
-        right: 10px;
-    }
-    
-    .rt-extract-btn {
-        padding: 10px 14px;
-        font-size: 13px;
-    }
-    
-    .rt-extract-btn img {
-        width: 18px;
-        height: 18px;
-    }
-    
-    #resume-tailor-notification {
-        top: 60px;
-        right: 10px;
-        left: 10px;
-        max-width: none;
-    }
-    
-    .rt-notification-content {
-        padding: 14px;
-        font-size: 13px;
-    }
-}
-
-/* Hide on print */
-@media print {
-    #resume-tailor-extract-btn,
-    #resume-tailor-notification {
-        display: none !important;
-    }
 }
 
 /* Site-specific adjustments */
 
 /* LinkedIn */
-body[class*="linkedin"] #resume-tailor-extract-btn {
-    top: 60px; /* Account for LinkedIn header */
+.jobs-apply-button ~ .rt-button-container,
+.jobs-s-apply ~ .rt-button-container,
+.jobs-unified-top-card__content .rt-button-container {
+    margin-top: 20px;
 }
 
 /* Indeed */
-body[class*="indeed"] #resume-tailor-extract-btn {
-    top: 70px; /* Account for Indeed header */
+.jobsearch-ApplyButtonContainer ~ .rt-button-container {
+    margin-top: 16px;
 }
 
 /* Glassdoor */
-body[class*="glassdoor"] #resume-tailor-extract-btn {
-    top: 80px; /* Account for Glassdoor header */
+.apply-btn ~ .rt-button-container {
+    margin-top: 20px;
 }
 
-/* Ensure button stays above site elements */
-#resume-tailor-extract-btn {
-    z-index: 999999 !important;
+/* Responsive design */
+@media (max-width: 768px) {
+    .resume-tailor-button {
+        padding: 12px 20px;
+        font-size: 13px;
+    }
+    
+    .rt-button-container.rt-floating {
+        top: 10px;
+        right: 10px;
+    }
+    
+    .rt-notification {
+        right: 10px;
+        top: 10px;
+        max-width: calc(100vw - 20px);
+    }
 }
 
-#resume-tailor-notification {
-    z-index: 999998 !important;
+/* Animation for button appearance */
+@keyframes slideInFromRight {
+    from {
+        opacity: 0;
+        transform: translateX(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.resume-tailor-button {
+    animation: slideInFromRight 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Pulse animation for new badge */
+@keyframes rt-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.rt-badge {
+    animation: rt-pulse 2s ease-in-out infinite;
+}
+
+/* Ensure button doesn't interfere with site functionality */
+.resume-tailor-button * {
+    pointer-events: none;
+}
+
+.resume-tailor-button {
+    pointer-events: auto;
 }

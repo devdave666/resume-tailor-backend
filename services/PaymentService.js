@@ -48,7 +48,7 @@ class PaymentService {
                 throw new Error(`Invalid package type: ${packageType}`);
             }
 
-            const package = this.tokenPackages[packageType];
+            const packageInfo = this.tokenPackages[packageType];
             
             // Verify user exists
             const user = await UserRepository.findById(userId);
@@ -64,11 +64,11 @@ class PaymentService {
                         price_data: {
                             currency: 'usd',
                             product_data: {
-                                name: package.name,
-                                description: package.description,
+                                name: packageInfo.name,
+                                description: packageInfo.description,
                                 images: [], // Add product images if available
                             },
-                            unit_amount: package.price,
+                            unit_amount: packageInfo.price,
                         },
                         quantity: 1,
                     },
@@ -81,7 +81,7 @@ class PaymentService {
                 metadata: {
                     userId: userId,
                     packageType: packageType,
-                    tokens: package.tokens.toString(),
+                    tokens: packageInfo.tokens.toString(),
                     timestamp: new Date().toISOString()
                 },
                 expires_at: Math.floor(Date.now() / 1000) + (30 * 60), // 30 minutes
@@ -102,8 +102,8 @@ class PaymentService {
                 userId,
                 sessionId: session.id,
                 packageType,
-                tokens: package.tokens,
-                amount: package.price,
+                tokens: packageInfo.tokens,
+                amount: packageInfo.price,
                 email: user.email
             });
 
@@ -112,9 +112,9 @@ class PaymentService {
                 url: session.url,
                 package: {
                     type: packageType,
-                    tokens: package.tokens,
-                    price: package.price,
-                    name: package.name
+                    tokens: packageInfo.tokens,
+                    price: packageInfo.price,
+                    name: packageInfo.name
                 }
             };
 

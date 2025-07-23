@@ -1,21 +1,21 @@
 {
   "manifest_version": 3,
-  "name": "Resume Tailor - AI Resume Optimizer",
+  "name": "Resume Tailor - AI Resume Generator",
   "version": "1.0.0",
-  "description": "Instantly tailor your resume for any job posting using AI. Extract job requirements and optimize your resume in seconds.",
+  "description": "Instantly tailor your resume to any job posting with AI. Generate professional resumes and cover letters in seconds.",
   "permissions": [
     "activeTab",
     "storage",
     "scripting"
   ],
   "host_permissions": [
+    "https://resume-tailor-bosan54oo-devkumar-daves-projects.vercel.app/*",
     "https://*.linkedin.com/*",
     "https://*.indeed.com/*",
     "https://*.glassdoor.com/*",
     "https://*.monster.com/*",
     "https://*.ziprecruiter.com/*",
-    "https://*.careerbuilder.com/*",
-    "https://resume-tailor-be8f8dbok-devkumar-daves-projects.vercel.app/*"
+    "https://*.careerbuilder.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -36,13 +36,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Resume Tailor",
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "32": "icons/icon32.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
-    }
+    "default_title": "Resume Tailor - Generate Tailored Resume"
   },
   "icons": {
     "16": "icons/icon16.png",
@@ -52,7 +46,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["icons/*"],
+      "resources": ["popup.html", "auth.html"],
       "matches": ["<all_urls>"]
     }
   ]

@@ -68,8 +68,12 @@ async function validateStartupConfig() {
     // Test database connection
     const connected = await testConnection();
     if (!connected) {
-        logger.error('Database connection failed');
-        process.exit(1);
+        if (process.env.USE_MOCK_DB === 'true') {
+            logger.warn('Using mock database for development');
+        } else {
+            logger.error('Database connection failed');
+            process.exit(1);
+        }
     }
     
     // Validate AI service configuration

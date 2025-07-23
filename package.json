@@ -4,10 +4,10 @@
   "description": "Minimal MVP backend for Resume Tailor Chrome Extension",
   "main": "api/index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
-    "vercel-dev": "vercel dev",
+    "start": "node api/index.js",
+    "dev": "vercel dev",
     "deploy": "vercel --prod",
+    "build": "echo 'No build step required'",
     "test": "jest",
     "test:watch": "jest --watch"
   },
