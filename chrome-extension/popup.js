@@ -59,58 +59,174 @@ class ResumeTailorApp {
     }
 
     setupEventListeners() {
-        // Auth tabs
-        document.getElementById('login-tab').addEventListener('click', () => this.switchAuthMode('login'));
-        document.getElementById('register-tab').addEventListener('click', () => this.switchAuthMode('register'));
-
-        // Auth form
-        document.getElementById('auth-form').addEventListener('submit', (e) => this.handleAuth(e));
-
-        // Workflow step navigation
-        document.querySelectorAll('.step').forEach((step, index) => {
-            step.addEventListener('click', () => this.navigateToStep(index + 1));
-        });
-
-        // File upload
-        const uploadArea = document.getElementById('upload-area');
-        const fileInput = document.getElementById('resume-file');
-
-        uploadArea.addEventListener('click', () => fileInput.click());
-        uploadArea.addEventListener('dragover', (e) => this.handleDragOver(e));
-        uploadArea.addEventListener('drop', (e) => this.handleFileDrop(e));
-        fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
-        document.getElementById('remove-file').addEventListener('click', () => this.removeFile());
-
-        // Job extraction
-        document.getElementById('extract-job').addEventListener('click', () => this.extractJobFromPage());
-
-        // Job description validation
-        document.getElementById('manual-job').addEventListener('input', (e) => this.validateJobDescription(e.target.value));
-        document.getElementById('manual-job').addEventListener('blur', (e) => this.validateJobDescription(e.target.value, true));
-
-        // Generate button
-        document.getElementById('generate-btn').addEventListener('click', () => {
-            const hasTokens = parseInt(document.getElementById('token-count').textContent) > 0;
-            if (hasTokens) {
-                this.generateResume();
+        console.log('Setting up event listeners...');
+        
+        try {
+            // Auth tabs
+            const loginTab = document.getElementById('login-tab');
+            const registerTab = document.getElementById('register-tab');
+            
+            if (loginTab && registerTab) {
+                loginTab.addEventListener('click', () => {
+                    console.log('Login tab clicked');
+                    this.switchAuthMode('login');
+                });
+                registerTab.addEventListener('click', () => {
+                    console.log('Register tab clicked');
+                    this.switchAuthMode('register');
+                });
+                console.log('Auth tabs event listeners added');
             } else {
-                this.buyTokens();
+                console.error('Auth tab elements not found');
             }
-        });
 
-        // Result tabs
-        document.getElementById('resume-tab').addEventListener('click', () => this.showResultTab('resume'));
-        document.getElementById('cover-tab').addEventListener('click', () => this.showResultTab('cover'));
+            // Auth form
+            const authForm = document.getElementById('auth-form');
+            if (authForm) {
+                authForm.addEventListener('submit', (e) => {
+                    console.log('Auth form submitted');
+                    this.handleAuth(e);
+                });
+                console.log('Auth form event listener added');
+            } else {
+                console.error('Auth form not found');
+            }
 
-        // Result actions
-        document.getElementById('copy-result').addEventListener('click', () => this.copyResult());
-        document.getElementById('download-result').addEventListener('click', () => this.downloadResult());
+            // Workflow step navigation
+            const steps = document.querySelectorAll('.step');
+            if (steps.length > 0) {
+                steps.forEach((step, index) => {
+                    step.addEventListener('click', () => {
+                        console.log(`Step ${index + 1} clicked`);
+                        this.navigateToStep(index + 1);
+                    });
+                });
+                console.log(`${steps.length} workflow steps event listeners added`);
+            } else {
+                console.error('No workflow steps found');
+            }
 
-        // Buy tokens
-        document.getElementById('buy-tokens').addEventListener('click', () => this.buyTokens());
+            // File upload
+            const uploadArea = document.getElementById('upload-area');
+            const fileInput = document.getElementById('resume-file');
+            const removeFileBtn = document.getElementById('remove-file');
 
-        // Logout
-        document.getElementById('logout').addEventListener('click', () => this.logout());
+            if (uploadArea && fileInput) {
+                uploadArea.addEventListener('click', () => {
+                    console.log('Upload area clicked');
+                    fileInput.click();
+                });
+                uploadArea.addEventListener('dragover', (e) => this.handleDragOver(e));
+                uploadArea.addEventListener('drop', (e) => this.handleFileDrop(e));
+                fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+                console.log('File upload event listeners added');
+            } else {
+                console.error('Upload area or file input not found');
+            }
+
+            if (removeFileBtn) {
+                removeFileBtn.addEventListener('click', () => {
+                    console.log('Remove file clicked');
+                    this.removeFile();
+                });
+            }
+
+            // Job extraction
+            const extractJobBtn = document.getElementById('extract-job');
+            if (extractJobBtn) {
+                extractJobBtn.addEventListener('click', () => {
+                    console.log('Extract job clicked');
+                    this.extractJobFromPage();
+                });
+                console.log('Extract job event listener added');
+            }
+
+            // Job description validation
+            const manualJobTextarea = document.getElementById('manual-job');
+            if (manualJobTextarea) {
+                manualJobTextarea.addEventListener('input', (e) => this.validateJobDescription(e.target.value));
+                manualJobTextarea.addEventListener('blur', (e) => this.validateJobDescription(e.target.value, true));
+                console.log('Job description validation event listeners added');
+            } else {
+                console.error('Manual job textarea not found');
+            }
+
+            // Generate button
+            const generateBtn = document.getElementById('generate-btn');
+            if (generateBtn) {
+                generateBtn.addEventListener('click', () => {
+                    console.log('Generate button clicked');
+                    const tokenCountEl = document.getElementById('token-count');
+                    const hasTokens = tokenCountEl && (parseInt(tokenCountEl.textContent) > 0 || tokenCountEl.textContent === '∞');
+                    if (hasTokens) {
+                        this.generateResume();
+                    } else {
+                        this.buyTokens();
+                    }
+                });
+                console.log('Generate button event listener added');
+            } else {
+                console.error('Generate button not found');
+            }
+
+            // Result tabs
+            const resumeTab = document.getElementById('resume-tab');
+            const coverTab = document.getElementById('cover-tab');
+            if (resumeTab && coverTab) {
+                resumeTab.addEventListener('click', () => {
+                    console.log('Resume tab clicked');
+                    this.showResultTab('resume');
+                });
+                coverTab.addEventListener('click', () => {
+                    console.log('Cover tab clicked');
+                    this.showResultTab('cover');
+                });
+                console.log('Result tabs event listeners added');
+            }
+
+            // Result actions
+            const copyResultBtn = document.getElementById('copy-result');
+            const downloadResultBtn = document.getElementById('download-result');
+            if (copyResultBtn) {
+                copyResultBtn.addEventListener('click', () => {
+                    console.log('Copy result clicked');
+                    this.copyResult();
+                });
+            }
+            if (downloadResultBtn) {
+                downloadResultBtn.addEventListener('click', () => {
+                    console.log('Download result clicked');
+                    this.downloadResult();
+                });
+            }
+
+            // Buy tokens
+            const buyTokensBtn = document.getElementById('buy-tokens');
+            if (buyTokensBtn) {
+                buyTokensBtn.addEventListener('click', () => {
+                    console.log('Buy tokens clicked');
+                    this.buyTokens();
+                });
+                console.log('Buy tokens event listener added');
+            } else {
+                console.error('Buy tokens button not found');
+            }
+
+            // Logout
+            const logoutBtn = document.getElementById('logout');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', () => {
+                    console.log('Logout clicked');
+                    this.logout();
+                });
+                console.log('Logout event listener added');
+            }
+
+            console.log('All event listeners setup completed');
+            
+        } catch (error) {
+            console.error('Error setting up event listeners:', error);
+        }
     }
 
     switchAuthMode(mode) {
@@ -848,7 +964,6 @@ Best regards,
         // Update UI to help user recover
         this.updateGenerateButton();
     }
-    }
 
     showResults(data) {
         document.getElementById('resume-content').textContent = data.tailoredResume;
@@ -1220,8 +1335,27 @@ Best regards,
 
 // Initialize the app when the popup loads
 document.addEventListener('DOMContentLoaded', () => {
-    new ResumeTailorApp();
+    console.log('DOM Content Loaded - Initializing Resume Tailor App');
+    try {
+        window.resumeTailorApp = new ResumeTailorApp();
+        console.log('Resume Tailor App initialized successfully');
+    } catch (error) {
+        console.error('Error initializing Resume Tailor App:', error);
+    }
 });
+
+// Also try to initialize if DOM is already loaded
+if (document.readyState === 'loading') {
+    console.log('DOM is still loading, waiting for DOMContentLoaded');
+} else {
+    console.log('DOM already loaded, initializing immediately');
+    try {
+        window.resumeTailorApp = new ResumeTailorApp();
+        console.log('Resume Tailor App initialized successfully (immediate)');
+    } catch (error) {
+        console.error('Error initializing Resume Tailor App (immediate):', error);
+    }
+}
 
 // Listen for job description changes
 document.addEventListener('input', (e) => {
