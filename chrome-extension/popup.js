@@ -10,6 +10,13 @@ class ResumeTailorApp {
         this.currentJob = null;
         this.uploadedFile = null;
         this.isAuthMode = 'login';
+        this.currentStep = 1;
+        this.workflowSteps = [
+            { id: 1, name: 'Job Details', completed: false },
+            { id: 2, name: 'Resume Upload', completed: false },
+            { id: 3, name: 'Generate', completed: false },
+            { id: 4, name: 'Results', completed: false }
+        ];
 
         this.init();
     }
@@ -59,6 +66,11 @@ class ResumeTailorApp {
         // Auth form
         document.getElementById('auth-form').addEventListener('submit', (e) => this.handleAuth(e));
 
+        // Workflow step navigation
+        document.querySelectorAll('.step').forEach((step, index) => {
+            step.addEventListener('click', () => this.navigateToStep(index + 1));
+        });
+
         // File upload
         const uploadArea = document.getElementById('upload-area');
         const fileInput = document.getElementById('resume-file');
@@ -71,6 +83,10 @@ class ResumeTailorApp {
 
         // Job extraction
         document.getElementById('extract-job').addEventListener('click', () => this.extractJobFromPage());
+
+        // Job description validation
+        document.getElementById('manual-job').addEventListener('input', (e) => this.validateJobDescription(e.target.value));
+        document.getElementById('manual-job').addEventListener('blur', (e) => this.validateJobDescription(e.target.value, true));
 
         // Generate button
         document.getElementById('generate-btn').addEventListener('click', () => {
@@ -336,9 +352,74 @@ class ResumeTailorApp {
     async extractJobFromPage() {
         if (this.currentJob && this.currentJob.description) {
             document.getElementById('manual-job').value = this.currentJob.description;
+            this.validateJobDescription(this.currentJob.description, true);
             this.updateGenerateButton();
-            this.showNotification('Job description extracted!', 'success');
+            this.showNotification('Job description extracted successfully!', 'success');
+            
+            // Auto-advance to next step if resume is already uploaded
+            if (this.uploadedFile) {
+                setTimeout(() => {
+                    this.navigateToStep(3); // Go to generate step
+                }, 1500);
+            } else {
+                setTimeout(() => {
+                    this.navigateToStep(2); // Go to resume upload step
+                }, 1000);
+            }
         }
+    }
+
+    validateJobDescription(text, showFeedback = false) {
+        const minLength = 50;
+        const recommendedLength = 200;
+        const maxLength = 10000;
+
+        // Remove validation styling first
+        const textarea = document.getElementById('manual-job');
+        textarea.classList.remove('validation-error', 'validation-warning', 'validation-success');
+
+        if (!text || text.trim().length === 0) {
+            if (showFeedback) {
+                this.showNotification('Please enter a job description to continue', 'warning');
+            }
+            return false;
+        }
+
+        const length = text.trim().length;
+
+        if (length < minLength) {
+            textarea.classList.add('validation-warning');
+            if (showFeedback) {
+                this.showNotification(`Job description is quite short (${length} characters). Consider adding more details for better results.`, 'warning');
+            }
+            return false;
+        }
+
+        if (length > maxLength) {
+            textarea.classList.add('validation-error');
+            if (showFeedback) {
+                this.showNotification(`Job description is too long (${length} characters). Please keep it under ${maxLength} characters.`, 'error');
+            }
+            return false;
+        }
+
+        // Check for key job-related keywords
+        const jobKeywords = ['experience', 'skills', 'requirements', 'responsibilities', 'qualifications', 'role', 'position', 'job', 'work'];
+        const hasJobKeywords = jobKeywords.some(keyword => text.toLowerCase().includes(keyword));
+
+        if (!hasJobKeywords && showFeedback) {
+            textarea.classList.add('validation-warning');
+            this.showNotification('This doesn\'t look like a typical job description. Make sure you\'ve pasted the complete job posting.', 'warning');
+            return false;
+        }
+
+        // Success validation
+        textarea.classList.add('validation-success');
+        if (showFeedback && length >= recommendedLength) {
+            this.showNotification('Great! Job description looks comprehensive.', 'success');
+        }
+
+        return true;
     }
 
     handleDragOver(e) {
@@ -365,21 +446,55 @@ class ResumeTailorApp {
 
     processFile(file) {
         const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
+        const maxSize = 10 * 1024 * 1024; // 10MB
 
+        // Validate file type
         if (!allowedTypes.includes(file.type)) {
-            this.showNotification('Please upload a PDF, DOC, DOCX, or TXT file', 'error');
+            this.showNotification('Invalid file type. Please upload a PDF, DOC, DOCX, or TXT file', 'error');
+            this.showFileValidationHelp();
             return;
         }
 
-        if (file.size > 10 * 1024 * 1024) {
-            this.showNotification('File size must be less than 10MB', 'error');
+        // Validate file size
+        if (file.size > maxSize) {
+            const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+            this.showNotification(`File too large (${sizeMB}MB). Maximum size is 10MB`, 'error');
+            this.showFileSizeHelp();
             return;
         }
 
+        // Validate file content (basic check)
+        if (file.size < 100) {
+            this.showNotification('File appears to be empty or too small', 'warning');
+            return;
+        }
+
+        // Success - process the file
         this.uploadedFile = file;
         document.getElementById('file-name').textContent = file.name;
         document.getElementById('file-info').classList.remove('hidden');
         this.updateGenerateButton();
+        
+        // Show success and guide to next step
+        this.showNotification('Resume uploaded successfully! Now you can generate your tailored resume.', 'success');
+        
+        // Auto-advance to next step if job details are already filled
+        const hasJob = document.getElementById('manual-job').value.trim().length > 0;
+        if (hasJob) {
+            setTimeout(() => {
+                this.navigateToStep(3); // Go to generate step
+            }, 1500);
+        }
+    }
+
+    showFileValidationHelp() {
+        // Could show a help tooltip or modal with supported formats
+        console.log('File validation help requested');
+    }
+
+    showFileSizeHelp() {
+        // Could show tips on reducing file size
+        console.log('File size help requested');
     }
 
     removeFile() {
@@ -399,6 +514,9 @@ class ResumeTailorApp {
 
         generateBtn.disabled = !(hasFile && hasJob && hasTokens);
 
+        // Update workflow steps
+        this.updateWorkflowSteps(hasJob, hasFile, hasTokens);
+
         // Update button text based on token availability
         const btnText = generateBtn.querySelector('.btn-text');
         const btnCost = generateBtn.querySelector('.btn-cost');
@@ -411,6 +529,93 @@ class ResumeTailorApp {
             if (btnCost) {
                 btnCost.textContent = isAdmin ? '(Free for Admin)' : '(1 token)';
                 btnCost.style.display = 'block';
+            }
+        }
+    }
+
+    updateWorkflowSteps(hasJob, hasFile, hasTokens) {
+        const steps = document.querySelectorAll('.step');
+        
+        // Update workflow state
+        this.workflowSteps[0].completed = hasJob;
+        this.workflowSteps[1].completed = hasFile;
+        this.workflowSteps[2].completed = hasTokens && hasJob && hasFile;
+        this.workflowSteps[3].completed = !document.getElementById('results-section').classList.contains('hidden');
+
+        // Update visual state
+        steps.forEach((stepElement, index) => {
+            const step = this.workflowSteps[index];
+            
+            // Remove all classes first
+            stepElement.classList.remove('active', 'completed', 'clickable');
+            
+            // Add appropriate classes
+            if (step.completed) {
+                stepElement.classList.add('completed');
+            }
+            
+            // Make steps clickable if they're accessible
+            if (this.isStepAccessible(index + 1)) {
+                stepElement.classList.add('clickable');
+            }
+            
+            // Highlight current step
+            if (index + 1 === this.currentStep) {
+                stepElement.classList.add('active');
+            }
+        });
+    }
+
+    isStepAccessible(stepNumber) {
+        switch (stepNumber) {
+            case 1: return true; // Job details always accessible
+            case 2: return this.workflowSteps[0].completed; // Resume upload after job details
+            case 3: return this.workflowSteps[0].completed && this.workflowSteps[1].completed; // Generate after both
+            case 4: return this.workflowSteps[3].completed; // Results only after generation
+            default: return false;
+        }
+    }
+
+    navigateToStep(stepNumber) {
+        if (!this.isStepAccessible(stepNumber)) {
+            this.showNotification('Please complete the previous steps first', 'warning');
+            return;
+        }
+
+        this.currentStep = stepNumber;
+        this.updateWorkflowSteps(
+            !!document.getElementById('manual-job').value.trim(),
+            !!this.uploadedFile,
+            parseInt(document.getElementById('token-count').textContent) > 0 || 
+            document.getElementById('token-count').textContent === '∞'
+        );
+
+        // Scroll to relevant section
+        this.scrollToStep(stepNumber);
+    }
+
+    scrollToStep(stepNumber) {
+        const sectionMap = {
+            1: '.job-detection',
+            2: '.upload-section', 
+            3: '.generate-section',
+            4: '#results-section'
+        };
+
+        const targetSelector = sectionMap[stepNumber];
+        if (targetSelector) {
+            const element = document.querySelector(targetSelector);
+            if (element) {
+                element.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'start' 
+                });
+                
+                // Add highlight effect
+                element.classList.add('step-highlight');
+                setTimeout(() => {
+                    element.classList.remove('step-highlight');
+                }, 2000);
             }
         }
     }
@@ -607,10 +812,42 @@ Best regards,
             }
         } catch (error) {
             console.error('Generation error:', error);
-            this.showNotification(error.message, 'error');
+            this.handleGenerationError(error);
         } finally {
             this.showLoading(false);
         }
+    }
+
+    handleGenerationError(error) {
+        let errorMessage = error.message;
+        let actionSuggestion = '';
+        let errorType = 'error';
+
+        // Categorize errors and provide helpful suggestions
+        if (errorMessage.includes('token')) {
+            errorMessage = 'Insufficient tokens to generate resume';
+            actionSuggestion = 'Purchase more tokens to continue';
+            errorType = 'warning';
+        } else if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+            errorMessage = 'Network connection issue';
+            actionSuggestion = 'Check your internet connection and try again';
+        } else if (errorMessage.includes('file') || errorMessage.includes('upload')) {
+            errorMessage = 'File upload issue';
+            actionSuggestion = 'Try uploading a different file or check file size (max 10MB)';
+        } else if (errorMessage.includes('API') || errorMessage.includes('server')) {
+            errorMessage = 'Service temporarily unavailable';
+            actionSuggestion = 'Please try again in a few moments';
+        } else if (errorMessage.includes('auth')) {
+            errorMessage = 'Authentication issue';
+            actionSuggestion = 'Please log out and log back in';
+        }
+
+        // Show error with suggestion
+        this.showNotification(`${errorMessage}. ${actionSuggestion}`, errorType);
+        
+        // Update UI to help user recover
+        this.updateGenerateButton();
+    }
     }
 
     showResults(data) {
@@ -618,6 +855,9 @@ Best regards,
         document.getElementById('cover-content').textContent = data.coverLetter;
         document.getElementById('results-section').classList.remove('hidden');
         this.currentResults = data;
+        
+        // Update workflow steps to show completion
+        this.updateGenerateButton();
     }
 
     showResultTab(tab) {
@@ -730,9 +970,42 @@ Best regards,
         }
     }
 
-    showLoading(show) {
-        document.getElementById('loading').classList.toggle('hidden', !show);
-        document.getElementById('main-section').classList.toggle('hidden', show);
+    showLoading(show, stage = 'Generating your tailored resume...') {
+        const loading = document.getElementById('loading');
+        const mainSection = document.getElementById('main-section');
+        
+        loading.classList.toggle('hidden', !show);
+        
+        if (show) {
+            this.updateLoadingStage(stage);
+            // Start progressive loading animation
+            this.simulateProgressiveLoading();
+        }
+    }
+
+    updateLoadingStage(stage) {
+        const loadingStage = document.getElementById('loading-stage');
+        const stages = {
+            'analyzing': 'Analyzing your resume...',
+            'extracting': 'Understanding job requirements...',
+            'tailoring': 'Tailoring your content...',
+            'generating': 'Generating cover letter...',
+            'finalizing': 'Finalizing your documents...'
+        };
+        
+        const stageText = stages[stage] || stage;
+        if (loadingStage) {
+            loadingStage.textContent = stageText;
+        }
+    }
+
+    async simulateProgressiveLoading() {
+        const stages = ['analyzing', 'extracting', 'tailoring', 'generating', 'finalizing'];
+        
+        for (let i = 0; i < stages.length; i++) {
+            this.updateLoadingStage(stages[i]);
+            await new Promise(resolve => setTimeout(resolve, 600));
+        }
     }
 
     showAuthSection() {
@@ -818,30 +1091,130 @@ Best regards,
     }
 
     showNotification(message, type = 'info') {
-        // Simple notification - you could enhance this with a proper notification system
         console.log(`${type.toUpperCase()}: ${message}`);
 
-        // Create a simple toast notification
-        const toast = document.createElement('div');
-        toast.textContent = message;
-        toast.style.cssText = `
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            padding: 12px 16px;
-            background: ${type === 'success' ? '#48bb78' : type === 'error' ? '#e53e3e' : '#667eea'};
-            color: white;
-            border-radius: 4px;
-            font-size: 13px;
-            z-index: 1000;
-            animation: slideIn 0.3s ease;
+        // Remove existing notifications
+        const existingNotifications = document.querySelectorAll('.notification');
+        existingNotifications.forEach(notification => notification.remove());
+
+        // Create modern notification
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        
+        const iconMap = {
+            success: '✓',
+            error: '⚠',
+            warning: '⚠',
+            info: 'ℹ'
+        };
+
+        notification.innerHTML = `
+            <div class="notification-content">
+                <span class="notification-icon">${iconMap[type] || 'ℹ'}</span>
+                <span class="notification-message">${message}</span>
+                <button class="notification-close">×</button>
+            </div>
         `;
 
-        document.body.appendChild(toast);
+        // Add styles
+        notification.style.cssText = `
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+            border: 1px solid var(--gray-200);
+            padding: 16px;
+            max-width: 300px;
+            z-index: 10000;
+            transform: translateX(100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-family: var(--font-primary);
+        `;
 
+        // Add type-specific styling
+        const borderColors = {
+            success: '#10b981',
+            error: '#ef4444',
+            warning: '#f59e0b',
+            info: '#6366f1'
+        };
+
+        notification.style.borderLeft = `4px solid ${borderColors[type] || borderColors.info}`;
+
+        // Style the content
+        const content = notification.querySelector('.notification-content');
+        content.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        `;
+
+        const icon = notification.querySelector('.notification-icon');
+        icon.style.cssText = `
+            font-size: 18px;
+            font-weight: bold;
+            color: ${borderColors[type] || borderColors.info};
+            flex-shrink: 0;
+        `;
+
+        const messageEl = notification.querySelector('.notification-message');
+        messageEl.style.cssText = `
+            flex: 1;
+            font-size: 14px;
+            font-weight: 500;
+            color: #374151;
+            line-height: 1.4;
+        `;
+
+        const closeBtn = notification.querySelector('.notification-close');
+        closeBtn.style.cssText = `
+            background: none;
+            border: none;
+            font-size: 18px;
+            color: #9ca3af;
+            cursor: pointer;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        `;
+
+        // Add event listeners
+        closeBtn.addEventListener('click', () => {
+            notification.style.transform = 'translateX(100%)';
+            setTimeout(() => notification.remove(), 300);
+        });
+
+        closeBtn.addEventListener('mouseenter', () => {
+            closeBtn.style.background = '#f3f4f6';
+            closeBtn.style.color = '#374151';
+        });
+
+        closeBtn.addEventListener('mouseleave', () => {
+            closeBtn.style.background = 'none';
+            closeBtn.style.color = '#9ca3af';
+        });
+
+        document.body.appendChild(notification);
+
+        // Animate in
         setTimeout(() => {
-            toast.remove();
-        }, 3000);
+            notification.style.transform = 'translateX(0)';
+        }, 100);
+
+        // Auto remove after 4 seconds
+        setTimeout(() => {
+            if (notification.parentElement) {
+                notification.style.transform = 'translateX(100%)';
+                setTimeout(() => notification.remove(), 300);
+            }
+        }, 4000);
     }
 }
 

@@ -208,6 +208,106 @@
     z-index: 10000;
 }
 
+/* Tooltip Styles */
+.rt-tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 12px;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 10002;
+    pointer-events: none;
+}
+
+.rt-show-tooltip .rt-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(-4px);
+}
+
+.rt-tooltip-content {
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 16px;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    min-width: 280px;
+    max-width: 320px;
+    text-align: left;
+    position: relative;
+}
+
+.rt-tooltip-content::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 8px solid transparent;
+    border-top-color: rgba(0, 0, 0, 0.9);
+}
+
+.rt-tooltip-content strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #ffffff;
+}
+
+.rt-tooltip-content p {
+    font-size: 13px;
+    line-height: 1.4;
+    margin-bottom: 12px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.rt-tooltip-features {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.rt-tooltip-features span {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Enhanced Button Container Positioning */
+.rt-button-container {
+    margin: 16px 0;
+    display: flex;
+    justify-content: flex-start;
+    position: relative;
+    z-index: 10000;
+}
+
+.rt-button-container.rt-floating {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10000;
+    margin: 0;
+}
+
+.rt-button-container.rt-fallback {
+    margin: 20px 0;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
 /* Site-specific adjustments */
 
 /* LinkedIn */
@@ -217,14 +317,34 @@
     margin-top: 20px;
 }
 
+/* LinkedIn specific positioning improvements */
+.jobs-details__main-content .rt-button-container {
+    margin: 20px 0;
+    padding: 0 24px;
+}
+
+.job-details-jobs-unified-top-card .rt-button-container {
+    margin-top: 16px;
+    padding: 0 24px;
+}
+
 /* Indeed */
 .jobsearch-ApplyButtonContainer ~ .rt-button-container {
     margin-top: 16px;
 }
 
+.jobsearch-JobComponent .rt-button-container {
+    margin: 16px 0;
+    padding: 0 16px;
+}
+
 /* Glassdoor */
 .apply-btn ~ .rt-button-container {
     margin-top: 20px;
+}
+
+.job-details-header .rt-button-container {
+    margin: 16px 0;
 }
 
 /* Responsive design */
@@ -258,8 +378,23 @@
     }
 }
 
+@keyframes fadeInScale {
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
 .resume-tailor-button {
     animation: slideInFromRight 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.resume-tailor-button.rt-inserted {
+    animation: fadeInScale 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Pulse animation for new badge */

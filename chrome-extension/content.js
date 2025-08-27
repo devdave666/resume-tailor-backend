@@ -11,20 +11,75 @@ class JobSiteDetector {
     }
 
     addResumeButton() {
-        // Only add button on job detail pages
-        if (!this.isJobDetailPage()) return;
+        try {
+            // Only add button on job detail pages
+            if (!this.isJobDetailPage()) {
+                console.log('Resume Tailor: Not a job detail page, skipping button insertion');
+                return;
+            }
 
-        // Remove existing button if present
-        const existingButton = document.getElementById('resume-tailor-btn');
-        if (existingButton) existingButton.remove();
+            // Remove existing button if present
+            const existingButton = document.getElementById('resume-tailor-btn');
+            if (existingButton) {
+                console.log('Resume Tailor: Removing existing button');
+                existingButton.remove();
+            }
 
-        // Create the button
-        const button = this.createResumeButton();
+            // Create the button
+            const button = this.createResumeButton();
+            
+            // Find the best place to insert the button
+            const insertLocation = this.findInsertLocation();
+            if (insertLocation) {
+                insertLocation.appendChild(button);
+                console.log('Resume Tailor: Button successfully added to page');
+                
+                // Add success animation
+                setTimeout(() => {
+                    button.classList.add('rt-inserted');
+                }, 100);
+            } else {
+                console.warn('Resume Tailor: Could not find suitable location for button');
+                // Retry after a delay in case content is still loading
+                setTimeout(() => this.retryButtonInsertion(), 2000);
+            }
+        } catch (error) {
+            console.error('Resume Tailor: Error adding button:', error);
+            // Retry on error
+            setTimeout(() => this.retryButtonInsertion(), 1000);
+        }
+    }
+
+    retryButtonInsertion(attempt = 1) {
+        const maxAttempts = 3;
         
-        // Find the best place to insert the button
-        const insertLocation = this.findInsertLocation();
-        if (insertLocation) {
-            insertLocation.appendChild(button);
+        if (attempt > maxAttempts) {
+            console.warn('Resume Tailor: Max retry attempts reached, giving up');
+            return;
+        }
+
+        console.log(`Resume Tailor: Retry attempt ${attempt}/${maxAttempts}`);
+        
+        try {
+            if (this.isJobDetailPage() && !document.getElementById('resume-tailor-btn')) {
+                const button = this.createResumeButton();
+                const insertLocation = this.findInsertLocation();
+                
+                if (insertLocation) {
+                    insertLocation.appendChild(button);
+                    console.log('Resume Tailor: Button successfully added on retry');
+                    
+                    setTimeout(() => {
+                        button.classList.add('rt-inserted');
+                    }, 100);
+                } else {
+                    // Try again with exponential backoff
+                    setTimeout(() => this.retryButtonInsertion(attempt + 1), 1000 * attempt);
+                }
+            }
+        } catch (error) {
+            console.error(`Resume Tailor: Retry attempt ${attempt} failed:`, error);
+            setTimeout(() => this.retryButtonInsertion(attempt + 1), 1000 * attempt);
         }
     }
 
@@ -32,49 +87,187 @@ class JobSiteDetector {
         const button = document.createElement('div');
         button.id = 'resume-tailor-btn';
         button.className = 'resume-tailor-button';
+        button.setAttribute('role', 'button');
+        button.setAttribute('tabindex', '0');
+        button.setAttribute('aria-label', 'Tailor your resume with AI for this job posting');
+        
         button.innerHTML = `
             <div class="rt-button-content">
                 <span class="rt-icon">📄</span>
                 <span class="rt-text">Tailor Resume with AI</span>
                 <span class="rt-badge">NEW</span>
             </div>
+            <div class="rt-tooltip">
+                <div class="rt-tooltip-content">
+                    <strong>AI Resume Tailoring</strong>
+                    <p>Automatically extract job details and customize your resume to match this position</p>
+                    <div class="rt-tooltip-features">
+                        <span>✓ Job analysis</span>
+                        <span>✓ Keyword optimization</span>
+                        <span>✓ Cover letter generation</span>
+                    </div>
+                </div>
+            </div>
         `;
 
+        // Add click handler
         button.addEventListener('click', () => {
             this.openResumeExtension();
+        });
+
+        // Add keyboard support
+        button.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                this.openResumeExtension();
+            }
+        });
+
+        // Add hover effects for tooltip
+        let tooltipTimeout;
+        button.addEventListener('mouseenter', () => {
+            clearTimeout(tooltipTimeout);
+            tooltipTimeout = setTimeout(() => {
+                button.classList.add('rt-show-tooltip');
+            }, 500);
+        });
+
+        button.addEventListener('mouseleave', () => {
+            clearTimeout(tooltipTimeout);
+            button.classList.remove('rt-show-tooltip');
         });
 
         return button;
     }
 
     findInsertLocation() {
-        const selectors = [
-            // LinkedIn
-            '.jobs-apply-button, .jobs-s-apply, .job-details-jobs-unified-top-card__content',
-            // Indeed
-            '.jobsearch-IndeedApplyButton, .jobsearch-ApplyButtonContainer, .jobsearch-JobInfoHeader-title-container',
-            // Glassdoor
-            '.apply-btn, .job-apply-button, .job-title-container',
-            // Generic fallbacks
-            '[class*="apply"], [class*="job-title"], [class*="job-header"]'
+        const hostname = window.location.hostname;
+        let selectors = [];
+
+        // Site-specific selectors with priority order
+        if (hostname.includes('linkedin.com')) {
+            selectors = [
+                '.jobs-apply-button',
+                '.jobs-s-apply', 
+                '.job-details-jobs-unified-top-card__content',
+                '.jobs-unified-top-card__content',
+                '.jobs-details__main-content .jobs-box__group',
+                '.job-details-jobs-unified-top-card'
+            ];
+        } else if (hostname.includes('indeed.com')) {
+            selectors = [
+                '.jobsearch-IndeedApplyButton',
+                '.jobsearch-ApplyButtonContainer',
+                '.jobsearch-JobInfoHeader-title-container',
+                '.jobsearch-JobComponent-header',
+                '[data-jk] .jobsearch-JobComponent'
+            ];
+        } else if (hostname.includes('glassdoor.com')) {
+            selectors = [
+                '.apply-btn',
+                '.job-apply-button',
+                '.job-title-container',
+                '[data-test="job-title"]',
+                '.job-details-header'
+            ];
+        } else {
+            // Generic fallbacks for other job sites
+            selectors = [
+                '[class*="apply"]',
+                '[class*="job-title"]',
+                '[class*="job-header"]',
+                '[class*="job-details"]',
+                'h1[class*="job"]',
+                '.job-description'
+            ];
+        }
+
+        // Try each selector in priority order
+        for (const selector of selectors) {
+            const elements = document.querySelectorAll(selector);
+            
+            for (const element of elements) {
+                if (this.isElementVisible(element) && this.isGoodInsertLocation(element)) {
+                    return this.createButtonContainer(element);
+                }
+            }
+        }
+
+        // Smart fallback: find the best location based on page structure
+        return this.findSmartFallbackLocation();
+    }
+
+    isElementVisible(element) {
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        
+        return rect.width > 0 && 
+               rect.height > 0 && 
+               style.display !== 'none' && 
+               style.visibility !== 'hidden' &&
+               style.opacity !== '0';
+    }
+
+    isGoodInsertLocation(element) {
+        // Avoid inserting in hidden containers, overlays, or navigation
+        const badParents = ['nav', 'header', 'footer', '.modal', '.overlay', '.dropdown'];
+        
+        let parent = element.parentElement;
+        while (parent && parent !== document.body) {
+            const tagName = parent.tagName.toLowerCase();
+            const className = parent.className.toLowerCase();
+            
+            if (badParents.some(bad => tagName === bad || className.includes(bad))) {
+                return false;
+            }
+            parent = parent.parentElement;
+        }
+        
+        return true;
+    }
+
+    createButtonContainer(referenceElement) {
+        // Check if container already exists
+        let existingContainer = referenceElement.parentElement.querySelector('.rt-button-container');
+        if (existingContainer) {
+            return existingContainer;
+        }
+
+        const container = document.createElement('div');
+        container.className = 'rt-button-container';
+        
+        // Insert after the reference element with proper spacing
+        if (referenceElement.nextSibling) {
+            referenceElement.parentElement.insertBefore(container, referenceElement.nextSibling);
+        } else {
+            referenceElement.parentElement.appendChild(container);
+        }
+        
+        return container;
+    }
+
+    findSmartFallbackLocation() {
+        // Look for job-related content areas
+        const contentSelectors = [
+            '[class*="job"][class*="content"]',
+            '[class*="job"][class*="details"]',
+            '[class*="job"][class*="info"]',
+            'main',
+            '.content',
+            '#content'
         ];
 
-        for (const selector of selectors) {
+        for (const selector of contentSelectors) {
             const element = document.querySelector(selector);
-            if (element) {
-                // Create a container if needed
-                let container = element.parentElement;
-                if (!container.classList.contains('rt-button-container')) {
-                    const wrapper = document.createElement('div');
-                    wrapper.className = 'rt-button-container';
-                    container.insertBefore(wrapper, element.nextSibling);
-                    container = wrapper;
-                }
+            if (element && this.isElementVisible(element)) {
+                const container = document.createElement('div');
+                container.className = 'rt-button-container rt-fallback';
+                element.insertBefore(container, element.firstChild);
                 return container;
             }
         }
 
-        // Fallback: add to body
+        // Last resort: floating button
         const fallbackContainer = document.createElement('div');
         fallbackContainer.className = 'rt-button-container rt-floating';
         document.body.appendChild(fallbackContainer);
@@ -109,25 +302,78 @@ class JobSiteDetector {
     }
 
     observePageChanges() {
-        // Handle single-page applications
         let currentUrl = window.location.href;
+        let debounceTimer;
         
-        const observer = new MutationObserver(() => {
+        // Enhanced mutation observer for SPA navigation
+        const observer = new MutationObserver((mutations) => {
+            // Check for URL changes
             if (window.location.href !== currentUrl) {
                 currentUrl = window.location.href;
-                setTimeout(() => this.addResumeButton(), 1000);
+                this.handlePageChange();
+                return;
+            }
+
+            // Check for significant DOM changes that might indicate new job content
+            const significantChange = mutations.some(mutation => {
+                if (mutation.type === 'childList') {
+                    // Look for job-related content changes
+                    const addedNodes = Array.from(mutation.addedNodes);
+                    return addedNodes.some(node => {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            const element = node;
+                            const className = element.className || '';
+                            const id = element.id || '';
+                            
+                            // Check if job-related content was added
+                            return className.includes('job') || 
+                                   id.includes('job') ||
+                                   element.querySelector('[class*="job"], [id*="job"]');
+                        }
+                        return false;
+                    });
+                }
+                return false;
+            });
+
+            if (significantChange) {
+                this.handlePageChange();
             }
         });
 
         observer.observe(document.body, {
             childList: true,
-            subtree: true
+            subtree: true,
+            attributes: false // Reduce noise from attribute changes
         });
 
-        // Also listen for navigation events
+        // Listen for navigation events
         window.addEventListener('popstate', () => {
-            setTimeout(() => this.addResumeButton(), 1000);
+            this.handlePageChange();
         });
+
+        // Listen for pushstate/replacestate (for SPAs)
+        const originalPushState = history.pushState;
+        const originalReplaceState = history.replaceState;
+
+        history.pushState = function(...args) {
+            originalPushState.apply(history, args);
+            setTimeout(() => this.handlePageChange(), 100);
+        }.bind(this);
+
+        history.replaceState = function(...args) {
+            originalReplaceState.apply(history, args);
+            setTimeout(() => this.handlePageChange(), 100);
+        }.bind(this);
+    }
+
+    handlePageChange() {
+        // Debounce rapid page changes
+        clearTimeout(this.pageChangeTimer);
+        this.pageChangeTimer = setTimeout(() => {
+            console.log('Resume Tailor: Page changed, checking for job content...');
+            this.addResumeButton();
+        }, 500);
     }
 
     async openResumeExtension() {
